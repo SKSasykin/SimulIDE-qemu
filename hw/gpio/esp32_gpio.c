@@ -20,7 +20,7 @@
 #include "hw/qdev-properties.h"
 #include "hw/gpio/esp32_gpio.h"
 
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 
 static void inputChanged( Esp32GpioState *gpioS, int pin, int val )

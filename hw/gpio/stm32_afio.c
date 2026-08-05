@@ -24,7 +24,7 @@
 #include "hw/hw.h"
 #include "qom/object.h"
 
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 /* DEFINITIONS */
 

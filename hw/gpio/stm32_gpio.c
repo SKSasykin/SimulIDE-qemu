@@ -24,7 +24,7 @@
 #include "hw/sysbus.h"
 #include "hw/irq.h"
 
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 #define GPIOx_CRL_OFFSET 0x00
 #define GPIOx_CRH_OFFSET 0x04

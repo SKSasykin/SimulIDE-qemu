@@ -15,7 +15,7 @@
 #include "qapi/visitor.h"
 #include "migration/vmstate.h"
 
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 static int i2c_id = 0;
 

@@ -28,7 +28,7 @@
 #include "migration/vmstate.h"
 #include "trace.h"
 
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 #define GPIO_MODER 0x00
 #define GPIO_OTYPER 0x04

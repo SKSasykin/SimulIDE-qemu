@@ -36,7 +36,7 @@
 #include "hw/ssi/ssi.h"
 
 #include "sysemu/cpu-timers.h"
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 
 /* DEFINITIONS */

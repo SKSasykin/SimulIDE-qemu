@@ -33,7 +33,7 @@
 #include "hw/irq.h"
 #include "hw/ptimer.h"
 
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 
 /* DEFINITIONS*/

@@ -28,7 +28,7 @@
 #include "hw/arm/stm32.h"
 //#include "hw/ssi/ssi.h"
 
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 #define CR1_OFFSET     0x00
 #define CR2_OFFSET     0x04

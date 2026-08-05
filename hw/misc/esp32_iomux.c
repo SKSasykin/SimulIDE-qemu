@@ -22,7 +22,7 @@
 #include "hw/misc/esp32_iomux.h"
 #include "sysemu/runstate.h"
 
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 
 static int getMuxGpio( int addr )
 {

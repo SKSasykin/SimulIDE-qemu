@@ -16,13 +16,20 @@ crypto_ss.add(files(
   'pbkdf.c',
   'secret_common.c',
   'secret.c',
-  'tlscreds.c',
-  'tlscredsanon.c',
-  'tlscredspsk.c',
-  'tlscredsx509.c',
-  'tlssession.c',
   'rsakey.c',
 ))
+
+# TLS code requires gnutls headers; attach the dep so include dirs
+# are propagated even when gcrypt/nettle supply the hash backend.
+if gnutls.found()
+  crypto_ss.add(gnutls, files(
+    'tlscreds.c',
+    'tlscredsanon.c',
+    'tlscredspsk.c',
+    'tlscredsx509.c',
+    'tlssession.c',
+  ))
+endif
 
 if gnutls.found()
   crypto_ss.add(files('x509-utils.c'))

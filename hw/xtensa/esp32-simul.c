@@ -25,6 +25,7 @@
 #include "hw/qdev-properties.h"
 #include "hw/xtensa/esp32.h"
 #include "hw/misc/ssi_psram.h"
+#include "hw/misc/esp32_simulide_bridge.h"
 #include "hw/sd/dwc_sdmmc.h"
 #include "core-esp32/core-isa.h"
 #include "qemu/datadir.h"
@@ -44,8 +45,18 @@
 #define TYPE_ESP32_CPU XTENSA_CPU_TYPE_NAME("esp32")
 
 // ----- Simulide ------------------------------
-#include "../system/simuliface.h"
+#include "../../system/simuliface.h"
 //----------------------------------------------
+
+#include "cpu.h"
+
+uint32_t esp32_simulide_bridge_get_pc(void)
+{
+    if (current_cpu) {
+        return cpu_env(current_cpu)->pc;
+    }
+    return 0;
+}
 
 
 enum {
@@ -513,7 +524,8 @@ static void esp32_soc_realize( DeviceState *dev, Error **errp )
     esp32_soc_add_unimp_device( sys_mem, "esp32.rtcio"  , DR_REG_SENS_BASE    , 0x400  );
 //    esp32_soc_add_unimp_device( sys_mem, "esp32.iomux"  , DR_REG_IO_MUX_BASE  , 0x2000 );
     esp32_soc_add_unimp_device( sys_mem, "esp32.hinf"   , DR_REG_HINF_BASE    , 0x1000 );
-    esp32_soc_add_unimp_device( sys_mem, "esp32.slc"    , DR_REG_SLC_BASE     , 0x1000 );
+    qdev_realize( DEVICE(&s->slc), &s->periph_bus, &error_abort);
+    esp32_soc_add_periph_device( sys_mem, &s->slc, DR_REG_SLC_BASE);
     esp32_soc_add_unimp_device( sys_mem, "esp32.slchost", DR_REG_SLCHOST_BASE , 0x1000 );
     esp32_soc_add_unimp_device( sys_mem, "esp32.apbctrl", DR_REG_APB_CTRL_BASE, 0x1000 );
     esp32_soc_add_unimp_device( sys_mem, "esp32.i2s0"   , DR_REG_I2S_BASE     , 0x1000 );
@@ -623,6 +635,7 @@ static void esp32_soc_init(Object *obj)
     object_initialize_child( obj, "rgb"      , &s->rgb      , TYPE_ESP_RGB );
 
     object_initialize_child( obj, "iomux"    , &s->iomux    , TYPE_ESP32_IOMUX);
+    object_initialize_child( obj, "slc"      , &s->slc      , TYPE_ESP32_SLC );
 
     qdev_init_gpio_in_named( DEVICE(s), esp32_dig_reset     , ESP32_RTC_DIG_RESET_GPIO, 1 );
     qdev_init_gpio_in_named( DEVICE(s), esp32_cpu_reset     , ESP32_RTC_CPU_RESET_GPIO, ESP32_CPU_COUNT );
@@ -809,12 +822,13 @@ static void esp32_machine_init(MachineState *machine)
     esp32_machine_init_openeth( ss );
     esp32_machine_init_sd( ss );
 
+    /* SimulIDE owns the whole IOMEM range: shadow all peripherals */
+    esp32_simulide_bridge_create( get_system_memory() );
+
     /* Need MMU initialized prior to ELF loading,
      * so that ELF gets loaded into virtual addresses
      */
-    cpu_reset( CPU(&ss->cpu[0]) );
-
-    const char *load_elf_filename = NULL;
+    cpu_reset( CPU(&ss->cpu[0]) );    const char *load_elf_filename = NULL;
     if( machine->firmware) load_elf_filename = machine->firmware;
 
     if( machine->kernel_filename ) {

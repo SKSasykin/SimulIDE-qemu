@@ -33,6 +33,7 @@
 #include "exec/exec-all.h"
 #include "qemu/atomic.h"
 #include "qemu/timer.h"
+#include "qemu/log.h"
 
 #ifndef CONFIG_USER_ONLY
 

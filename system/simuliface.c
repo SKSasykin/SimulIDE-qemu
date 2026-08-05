@@ -1,10 +1,11 @@
 /***************************************************************************
  *   Copyright (C) 2025 by Santiago González                               *
  *                                                                         *
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 or
- * (at your option) any later version.
+ *  Modified by opencode 2026: master regAddr/regData protocol + macOS     *
+ *                                                                         *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License version 2 or
+ *  (at your option) any later version.
  */
 
 #include <sys/stat.h>
@@ -13,7 +14,7 @@
 #include <unistd.h>
 #include <stdio.h>
 
-#ifdef __linux__
+#if defined( __linux__ ) || defined( __APPLE__ )
 #include <sys/mman.h>
 #include <sys/shm.h>
 //#elif defined(_WIN32)
@@ -29,7 +30,6 @@
 #include "sysemu/sysemu.h"
 #include "sysemu/cpu-timers.h"
 #include "hw/irq.h"
-#include "hw/arm/stm32.h"
 
 // ------------------------------------------------
 // -------- ARENA ---------------------------------
@@ -39,79 +39,90 @@ volatile qemuArena_t* m_arena = NULL;
 // ------------------------------------------------
 
 uint64_t m_timeout;
-//uint64_t m_resetEvent;
-//uint64_t m_ClkPeriod;
 uint64_t m_lastQemuTime;
-//bool m_running;
 
 QEMUTimer* qtimer;
 
+static uint64_t s_simuTime;   // last time signaled to SimulIDE (monotonic)
+static uint64_t s_nextEvent;  // next scheduled SIM_EVENT tick (ps)
+
+#define SIMULIDE_IOMEM_BASE 0x3FF00000
+#define SIMULIDE_TICK_PS   1000000ull // 1 us between SIM_EVENT ticks
 
 uint64_t getQemu_ps(void)
 {
-    uint64_t qemuTime = icount_get_ps(); //qemu_clock_get_ns( QEMU_CLOCK_VIRTUAL ); // ns //icount_get_ps; //
-    //qemuTime *= 1000;
+    uint64_t qemuTime = icount_get_ps();
     return qemuTime;
 }
 
-static void getNextEvent(void)
+// Monotonic view of QEMU time, never going backwards wrt SimulIDE
+static uint64_t simulide_time(void)
 {
-    while( !m_arena->qemuTime ) // Wait for SimuliDE
-    {
-        if( m_timeout++ > 1e9 ) break; // Terminate process if timed out
-    }
-    m_timeout = 0;
-
-    uint64_t nextTime_ns = m_arena->qemuTime/1000;
-    //m_arena->qemuTime = 0;
-
-    if( m_lastQemuTime != nextTime_ns )
-    {
-        //printf("Qemu: config timer at %lu\n", nextTime ); fflush( stdout );
-        m_lastQemuTime = nextTime_ns;
-        timer_mod_ns( qtimer, nextTime_ns );
-    }
-    //printf("Qemu: Next time %lu\n", m_lastQemuTime*1000 ); fflush( stdout );
+    uint64_t now = getQemu_ps();
+    if( now < s_simuTime ) now = s_simuTime;
+    return now;
 }
 
-void doAction(void)
+static void simulide_wait(void) // Wait for SimulIDE to consume the event (simuTime == 0)
 {
-    m_arena->qemuTime = 0;
-    //printf("Qemu: doAction at time %lu\n", getQemu_ps() ); fflush( stdout );
-    m_arena->simuTime = getQemu_ps();
-
-    while( m_arena->simuTime )  // Wait for SimulIDE to execute action
+    m_timeout = 0;
+    while( m_arena->simuTime )
     {
-        if( m_arena->qemuAction )
-        {
-            switch( m_arena->qemuAction )
-            {
-            case SIM_I2C: break;
-            case SIM_USART: stm32_uart_action(); break;
-            case SIM_TIMER: break;//stm32_timer_action(); break;
-            case SIM_GPIO_IN: stm32_gpio_in_action(); break;
-            default: break;
-            }
-            m_arena->qemuAction = 0;
-            //while( !m_arena->qemuAction ){;}
-        }
-        if( m_timeout++ > 1e9 ) break; // Terminate process if timed out
+        if( m_timeout++ > 1e9 ) break; // Terminate loop if timed out
+    }
+    m_timeout = 0;
+}
+
+void simulide_signal( uint64_t action, uint64_t time_ps )
+{
+    m_arena->simuAction = action;
+    m_arena->simuTime   = time_ps;
+    s_simuTime          = time_ps;
+    simulide_wait();
+}
+
+uint32_t simulide_bridge_read( uint32_t addr )
+{
+    m_arena->regAddr = addr; // addr is already an IOMEM offset
+    m_arena->regData = 0;
+    simulide_signal( SIM_READ, simulide_time() );
+
+    m_timeout = 0;
+    while( m_arena->qemuAction != SIM_READ ) // Wait for SimulIDE answer
+    {
+        if( m_timeout++ > 1e9 ) break; // Terminate loop if timed out
     }
     m_timeout = 0;
 
-    //printf("Qemu: qemuAction %u %u\n", m_arena->qemuAction, m_arena->data8 );
-    //printf("      at time %lu\n", getQemu_ps() ); fflush( stdout );
+    uint32_t val = (uint32_t)m_arena->regData;
+    m_arena->qemuAction = 0;
+    return val;
+}
 
-    getNextEvent();
+void simulide_bridge_write( uint32_t addr, uint32_t value )
+{
+    m_arena->regAddr = addr; // addr is already an IOMEM offset
+    m_arena->regData = value;
+    simulide_signal( SIM_WRITE, simulide_time() );
+}
+
+void doAction(void) // Legacy entry point for dormant devices
+{
+    simulide_signal( SIM_EVENT, simulide_time() );
+}
+
+static void scheduleNextEvent(void)
+{
+    s_nextEvent = s_simuTime + SIMULIDE_TICK_PS;
+    timer_mod_ns( qtimer, s_nextEvent/1000 );
 }
 
 static void simu_event( void* opaque )
 {
-    //printf("Qemu: simu_event at %lu\n", getQemu_ps() ); fflush( stdout );
     if( !m_arena->running ) return;
 
-    m_arena->simuAction = SIM_EVENT;
-    doAction();
+    simulide_signal( SIM_EVENT, s_nextEvent );
+    scheduleNextEvent();
 }
 
 int simuMain( int argc, char** argv )
@@ -131,7 +142,7 @@ int simuMain( int argc, char** argv )
 
     void* arena = NULL;
 
-#ifdef __linux__
+#if defined( __linux__ ) || defined( __APPLE__ )
     int shMemId = shm_open( shMemKey, O_RDWR, 0666 ); // Open the shared memory object
     if( shMemId == -1 )
     {
@@ -161,9 +172,10 @@ int simuMain( int argc, char** argv )
 
     m_arena = (qemuArena_t*)arena;
 
-    //------------------------------------------------------------------
+    // SimulIDE reads ps_per_inst (e.g. SPI clock): default ESP32 240 MHz
+    m_arena->ps_per_inst = 1e12/240e6;
 
-    //m_ClkPeriod = 100*1000; // 100 us              //*1000; // ~1 ms
+    //------------------------------------------------------------------
 
     printf("-----------------------------------\n");
     for( int i=0; i<argc; i++)
@@ -180,24 +192,19 @@ int simuMain( int argc, char** argv )
     qtimer = (QEMUTimer*)malloc( sizeof(QEMUTimer) );
     timer_init_full( qtimer, NULL, QEMU_CLOCK_VIRTUAL, 1, 0, simu_event, NULL );
 
-    m_lastQemuTime = 0; //m_resetEvent;
+    m_lastQemuTime = 0;
+    s_simuTime     = 0;
     m_arena->running = true;
 
     printf("Qemu: initialized\n" );fflush( stdout );
 
-    while( m_arena->qemuTime == 0 )  // Wait for simulide to set next time
-    {
-        m_timeout += 1;
-        if( m_timeout > 1e9 ) break; // Terminate loop if timed out
-    }
-    m_timeout = 0;
-    getNextEvent();
+    scheduleNextEvent();
 
     printf("Qemu: starting main loop\n");fflush( stdout );
     int status = qemu_main_loop();
     qemu_cleanup( status );
 
-#ifdef __linux__
+#if defined( __linux__ ) || defined( __APPLE__ )
     munmap( arena, shMemSize ); // Un-map shared memory
 #elif defined(_WIN32)
     UnmapViewOfFile( arena );
