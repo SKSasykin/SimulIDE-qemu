@@ -29,6 +29,8 @@
 #include "hw/qdev-properties.h"
 #include "hw/sysbus.h"
 #include "hw/misc/esp32_reg.h"
+#include "hw/misc/esp32s3_reg.h"
+#include "hw/misc/esp32c3_reg.h"
 #include "hw/misc/esp32_simulide_bridge.h"
 
 #include "../../system/simuliface.h"
@@ -43,7 +45,7 @@ typedef struct Esp32SimulideBridgeState Esp32SimulideBridgeState;
 
 typedef struct Esp32SimulideBridgeRange {
     Esp32SimulideBridgeState *state;
-    uint32_t base;      /* SimulIDE IOMEM offset (relative to 0x3FF00000) */
+    uint32_t base;      /* SimulIDE IOMEM offset (relative to the chip IOMEM base) */
     hwaddr   map_base;  /* physical sys_mem address where the range is installed */
 } Esp32SimulideBridgeRange;
 
@@ -54,6 +56,8 @@ typedef struct Esp32SimulideBridgeState {
     Esp32SimulideBridgeRange ranges[ESP32_SIMULIDE_BRIDGE_MAX_RANGES];
     unsigned      n_ranges;
 
+    uint32_t      iomem_size;    /* SimulIDE IOMEM window size               */
+    uint32_t      strap_offset;  /* full IOMEM offset of the GPIO_STRAP reg  */
     uint32_t      strap_mode;
 } Esp32SimulideBridgeState;
 
@@ -70,12 +74,19 @@ typedef struct Esp32SimulideBridgeState {
  * So GPIO15 must be high. 0x17 mirrors a real devkitC v4 (GPIO0=1,
  * GPIO2=1, GPIO5=1, GPIO12=0, GPIO15=1). */
 #define ESP32_SIMULIDE_BRIDGE_STRAP_SPI_BOOT 0x17
+#define ESP32S3_SIMULIDE_BRIDGE_STRAP_SPI_BOOT 0x4
+#define ESP32C3_SIMULIDE_BRIDGE_STRAP_SPI_BOOT 0x8
 
 static Property esp32_simulide_bridge_properties[] = {
     DEFINE_PROP_UINT32( "strap-mode", Esp32SimulideBridgeState,
                         strap_mode, ESP32_SIMULIDE_BRIDGE_STRAP_SPI_BOOT ),
     DEFINE_PROP_END_OF_LIST(),
 };
+
+typedef struct Esp32SimulideBridgeMap {
+    hwaddr   map_base;   /* physical address to map at */
+    uint32_t simul_off;  /* SimulIDE IOMEM offset      */
+} Esp32SimulideBridgeMap;
 
 /* One entry per peripheral SimulIDE models; offsets are IOMEM offsets
  * (relative to 0x3FF00000). Keep in sync with src/microsim/cores/qemu/
@@ -88,10 +99,7 @@ static Property esp32_simulide_bridge_properties[] = {
  * real esp32_uart device and be dropped (no chardev attached). They are
  * forwarded to SimulIDE with the matching dport IOMEM offset so the
  * UART module sees the exact same register writes as dport accesses. */
-static const struct {
-    hwaddr   map_base;   /* physical address to map at */
-    uint32_t simul_off;  /* SimulIDE IOMEM offset      */
-} esp32_simulide_bridge_maps[] = {
+static const Esp32SimulideBridgeMap esp32_simulide_bridge_maps[] = {
     { ESP32_SIMULIDE_BRIDGE_BASE + 0x00040000, 0x00040000 }, /* UART1 (hw UART0) */
     { ESP32_SIMULIDE_BRIDGE_BASE + 0x00044000, 0x00044000 }, /* GPIO              */
     { ESP32_SIMULIDE_BRIDGE_BASE + 0x00049000, 0x00049000 }, /* IOMUX             */
@@ -107,8 +115,29 @@ static const struct {
     { APB_REG_BASE + 0x0002E000,                0x0006E000 }, /* UART2 AHB FIFO    */
 };
 
+/* ESP32-S3: only the ranges SimulIDE models (UARTs + GPIO) are shadowed.
+ * SPI0/SPI1 (0x60002000/0x60003000) are left to the real models because
+ * the boot ROM needs them to load the flash firmware. Offsets are IOMEM
+ * offsets relative to 0x60000000. Keep in sync with Esp32s3 class. */
+static const Esp32SimulideBridgeMap esp32s3_simulide_bridge_maps[] = {
+    { DR_REG_UART_BASE + 0x00000000, 0x00000000 }, /* UART0            */
+    { DR_REG_GPIO_BASE + 0x00000000, 0x00004000 }, /* GPIO             */
+    { DR_REG_UART1_BASE + 0x00000000, 0x00010000 }, /* UART1           */
+    { DR_REG_UART2_BASE + 0x00000000, 0x0002E000 }, /* UART2           */
+};
+
+/* ESP32-C3: same approach as the S3 (UARTs + GPIO only). */
+static const Esp32SimulideBridgeMap esp32c3_simulide_bridge_maps[] = {
+    { DR_REG_UART_BASE + 0x00000000, 0x00000000 }, /* UART0            */
+    { DR_REG_GPIO_BASE + 0x00000000, 0x00004000 }, /* GPIO             */
+    { DR_REG_UART1_BASE + 0x00000000, 0x00010000 }, /* UART1           */
+};
+
 /* GPIO_STRAP offset inside the GPIO block (0x44000 + 0x38). */
 #define ESP32_SIMULIDE_BRIDGE_GPIO_STRAP 0x00044038
+/* S3/C3 GPIO block is at 0x60004000, so full IOMEM offset is 0x4038. */
+#define ESP32S3_SIMULIDE_BRIDGE_GPIO_STRAP 0x00004038
+#define ESP32C3_SIMULIDE_BRIDGE_GPIO_STRAP 0x00004038
 
 static uint64_t esp32_simulide_bridge_read(void *opaque, hwaddr offset,
                                            unsigned size)
@@ -117,7 +146,7 @@ static uint64_t esp32_simulide_bridge_read(void *opaque, hwaddr offset,
     Esp32SimulideBridgeState *s = range->state;
     uint32_t full = range->base + (uint32_t) offset;
 
-    if( full >= ESP32_SIMULIDE_BRIDGE_SIZE ) {
+    if( full >= s->iomem_size ) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: read out of range offset=0x%"
                       HWADDR_PRIx "\n", __func__, offset);
         return 0;
@@ -127,7 +156,7 @@ static uint64_t esp32_simulide_bridge_read(void *opaque, hwaddr offset,
      * GPIO module has no notion of straps, so answer here or the ROM
      * would always fall into UART download mode. Default is SPI boot
      * (GPIO0=1, GPIO2=1, GPIO5=1, GPIO15=1). */
-    if( full == ESP32_SIMULIDE_BRIDGE_GPIO_STRAP ) {
+    if( full == s->strap_offset ) {
         return (uint64_t) s->strap_mode;
     }
     {
@@ -140,9 +169,10 @@ static void esp32_simulide_bridge_write(void *opaque, hwaddr offset,
                                         uint64_t value, unsigned size)
 {
     Esp32SimulideBridgeRange *range = (Esp32SimulideBridgeRange *) opaque;
+    Esp32SimulideBridgeState *s = range->state;
     uint32_t full = range->base + (uint32_t) offset;
 
-    if( full >= ESP32_SIMULIDE_BRIDGE_SIZE ) {
+    if( full >= s->iomem_size ) {
         qemu_log_mask(LOG_GUEST_ERROR, "%s: write out of range offset=0x%"
                       HWADDR_PRIx "\n", __func__, offset);
         return;
@@ -160,29 +190,63 @@ static const MemoryRegionOps esp32_simulide_bridge_ops = {
     },
 };
 
-static void esp32_simulide_bridge_init(Object *obj)
+static void esp32_simulide_bridge_init_common(
+        Object *obj, const char *type_name,
+        const Esp32SimulideBridgeMap *maps,
+        unsigned n, uint32_t iomem_size, uint32_t strap_offset,
+        uint32_t strap_mode )
 {
-    Esp32SimulideBridgeState *s = ESP32_SIMULIDE_BRIDGE(obj);
-    unsigned n = ARRAY_SIZE( esp32_simulide_bridge_maps );
+    Esp32SimulideBridgeState *s = (Esp32SimulideBridgeState *)obj;
     unsigned i;
 
     s->n_ranges = n;
-    s->strap_mode = ESP32_SIMULIDE_BRIDGE_STRAP_SPI_BOOT; /* SPI boot */
+    s->iomem_size = iomem_size;
+    s->strap_offset = strap_offset;
+    s->strap_mode = strap_mode;
 
     for( i = 0; i < n; i++ ) {
         MemoryRegion *iomem = g_new(MemoryRegion, 1);
         char name[48];
 
         s->ranges[i].state = s;
-        s->ranges[i].base = esp32_simulide_bridge_maps[i].simul_off;
-        s->ranges[i].map_base = esp32_simulide_bridge_maps[i].map_base;
-        snprintf( name, sizeof(name), "%s-%u",
-                  TYPE_ESP32_SIMULIDE_BRIDGE, i );
+        s->ranges[i].base = maps[i].simul_off;
+        s->ranges[i].map_base = maps[i].map_base;
+        snprintf( name, sizeof(name), "%s-%u", type_name, i );
         memory_region_init_io( iomem, OBJECT(obj), &esp32_simulide_bridge_ops,
                                &s->ranges[i], name,
                                ESP32_SIMULIDE_BRIDGE_RANGE );
         s->regions[i] = iomem;
     }
+}
+
+static void esp32_simulide_bridge_init(Object *obj)
+{
+    esp32_simulide_bridge_init_common(
+        obj, TYPE_ESP32_SIMULIDE_BRIDGE,
+        esp32_simulide_bridge_maps, ARRAY_SIZE( esp32_simulide_bridge_maps ),
+        ESP32_SIMULIDE_BRIDGE_SIZE,
+        ESP32_SIMULIDE_BRIDGE_GPIO_STRAP,
+        ESP32_SIMULIDE_BRIDGE_STRAP_SPI_BOOT );
+}
+
+static void esp32s3_simulide_bridge_init(Object *obj)
+{
+    esp32_simulide_bridge_init_common(
+        obj, TYPE_ESP32S3_SIMULIDE_BRIDGE,
+        esp32s3_simulide_bridge_maps, ARRAY_SIZE( esp32s3_simulide_bridge_maps ),
+        ESP32_SIMULIDE_BRIDGE_SIZE,
+        ESP32S3_SIMULIDE_BRIDGE_GPIO_STRAP,
+        ESP32S3_SIMULIDE_BRIDGE_STRAP_SPI_BOOT );
+}
+
+static void esp32c3_simulide_bridge_init(Object *obj)
+{
+    esp32_simulide_bridge_init_common(
+        obj, TYPE_ESP32C3_SIMULIDE_BRIDGE,
+        esp32c3_simulide_bridge_maps, ARRAY_SIZE( esp32c3_simulide_bridge_maps ),
+        ESP32_SIMULIDE_BRIDGE_SIZE,
+        ESP32C3_SIMULIDE_BRIDGE_GPIO_STRAP,
+        ESP32C3_SIMULIDE_BRIDGE_STRAP_SPI_BOOT );
 }
 
 static void esp32_simulide_bridge_class_init(ObjectClass *klass, void *data)
@@ -201,17 +265,36 @@ static const TypeInfo esp32_simulide_bridge_info = {
     .class_init = esp32_simulide_bridge_class_init,
 };
 
+static const TypeInfo esp32s3_simulide_bridge_info = {
+    .name = TYPE_ESP32S3_SIMULIDE_BRIDGE,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_size = sizeof(Esp32SimulideBridgeState),
+    .instance_init = esp32s3_simulide_bridge_init,
+    .class_init = esp32_simulide_bridge_class_init,
+};
+
+static const TypeInfo esp32c3_simulide_bridge_info = {
+    .name = TYPE_ESP32C3_SIMULIDE_BRIDGE,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_size = sizeof(Esp32SimulideBridgeState),
+    .instance_init = esp32c3_simulide_bridge_init,
+    .class_init = esp32_simulide_bridge_class_init,
+};
+
 static void esp32_simulide_bridge_register_types(void)
 {
     type_register_static(&esp32_simulide_bridge_info);
+    type_register_static(&esp32s3_simulide_bridge_info);
+    type_register_static(&esp32c3_simulide_bridge_info);
 }
 
 type_init(esp32_simulide_bridge_register_types);
 
-void esp32_simulide_bridge_create(MemoryRegion *sys_mem)
+static void esp32_simulide_bridge_create_common(MemoryRegion *sys_mem,
+                                                const char *type_name)
 {
     Esp32SimulideBridgeState *s =
-        ESP32_SIMULIDE_BRIDGE( qdev_new( TYPE_ESP32_SIMULIDE_BRIDGE ) );
+        (Esp32SimulideBridgeState *)qdev_new( type_name );
     unsigned i;
 
     sysbus_realize_and_unref( SYS_BUS_DEVICE( DEVICE(s) ), &error_fatal );
@@ -221,4 +304,22 @@ void esp32_simulide_bridge_create(MemoryRegion *sys_mem)
                                              s->ranges[i].map_base,
                                              s->regions[i], 1 );
     }
+}
+
+void esp32_simulide_bridge_create(MemoryRegion *sys_mem)
+{
+    esp32_simulide_bridge_create_common( sys_mem,
+                                         TYPE_ESP32_SIMULIDE_BRIDGE );
+}
+
+void esp32s3_simulide_bridge_create(MemoryRegion *sys_mem)
+{
+    esp32_simulide_bridge_create_common( sys_mem,
+                                         TYPE_ESP32S3_SIMULIDE_BRIDGE );
+}
+
+void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem)
+{
+    esp32_simulide_bridge_create_common( sys_mem,
+                                         TYPE_ESP32C3_SIMULIDE_BRIDGE );
 }

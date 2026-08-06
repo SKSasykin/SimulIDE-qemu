@@ -14,8 +14,12 @@
 #include "hw/sysbus.h"
 
 #define TYPE_ESP32_SIMULIDE_BRIDGE "esp32-simulide-bridge"
+#define TYPE_ESP32S3_SIMULIDE_BRIDGE "esp32s3-simulide-bridge"
+#define TYPE_ESP32C3_SIMULIDE_BRIDGE "esp32c3-simulide-bridge"
 #define ESP32_SIMULIDE_BRIDGE_MAX_RANGES 16
 
 void esp32_simulide_bridge_create(MemoryRegion *sys_mem);
+void esp32s3_simulide_bridge_create(MemoryRegion *sys_mem);
+void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem);
 
 #endif
