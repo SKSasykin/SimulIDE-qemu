@@ -46,6 +46,7 @@
 
 #include "hw/ssi/esp32s3_spi.h"
 #include "hw/misc/esp32s3_cache.h"
+#include "hw/misc/esp32_simulide_bridge.h"
 #include "hw/char/esp32s3_uart.h"
 #include "hw/misc/esp32s3_rng.h"
 
@@ -901,6 +902,8 @@ static void esp32s3_machine_init(MachineState *machine)
             g_free(rom_binary);
         }
     }
+
+    esp32s3_simulide_bridge_create(sys_mem);
 }
 
 
