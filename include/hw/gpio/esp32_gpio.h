@@ -14,8 +14,8 @@
 
 REG32( GPIO_STRAP, 0x0038 )
 
-#define ESP32_STRAP_MODE_FLASH_BOOT 0x1
-#define ESP32_STRAP_MODE_UART_BOOT  0x0f
+#define ESP32_STRAP_MODE_FLASH_BOOT 0x17 /* SPI boot: GPIO0/2/5/15=1, GPIO12=0 */
+#define ESP32_STRAP_MODE_UART_BOOT  0x16 /* UART download: GPIO0=0, rest as above */
 
 typedef struct Esp32GpioState {
     SysBusDevice parent_obj;

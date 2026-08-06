@@ -60,9 +60,20 @@ typedef struct Esp32SimulideBridgeState {
 #define ESP32_SIMULIDE_BRIDGE(obj) \
     OBJECT_CHECK(Esp32SimulideBridgeState, (obj), TYPE_ESP32_SIMULIDE_BRIDGE)
 
+/* GPIO_STRAP value that makes the ESP32 v3 boot ROM pick
+ * SPI_FAST_FLASH_BOOT (boot:0x17) instead of UART download.
+ *
+ * The ROM's main() computes the boot mode from GPIO_STRAP as follows:
+ *   - (strap & 0x18) == 0  (GPIO12 and GPIO15 both low) -> DOWNLOAD_BOOT
+ *   - (strap & 0x18) != 0  -> SPI_FAST_FLASH_BOOT when GPIO15 (bit4)
+ *     is high, HSPI_FAST_FLASH_BOOT when only GPIO12 (bit3) is high.
+ * So GPIO15 must be high. 0x17 mirrors a real devkitC v4 (GPIO0=1,
+ * GPIO2=1, GPIO5=1, GPIO12=0, GPIO15=1). */
+#define ESP32_SIMULIDE_BRIDGE_STRAP_SPI_BOOT 0x17
+
 static Property esp32_simulide_bridge_properties[] = {
     DEFINE_PROP_UINT32( "strap-mode", Esp32SimulideBridgeState,
-                        strap_mode, 1 ),
+                        strap_mode, ESP32_SIMULIDE_BRIDGE_STRAP_SPI_BOOT ),
     DEFINE_PROP_END_OF_LIST(),
 };
 
@@ -112,10 +123,10 @@ static uint64_t esp32_simulide_bridge_read(void *opaque, hwaddr offset,
         return 0;
     }
     /* The boot ROM selects its boot mode from GPIO straps (GPIO0/GPIO2/
-     * GPIO15, read through GPIO_STRAP at 0x3FF44038). SimulIDE's GPIO
-     * module has no notion of straps, so answer here or the ROM would
-     * always fall into UART download mode. Default is SPI boot
-     * (GPIO0=1). */
+     * GPIO12/GPIO15, read through GPIO_STRAP at 0x3FF44038). SimulIDE's
+     * GPIO module has no notion of straps, so answer here or the ROM
+     * would always fall into UART download mode. Default is SPI boot
+     * (GPIO0=1, GPIO2=1, GPIO5=1, GPIO15=1). */
     if( full == ESP32_SIMULIDE_BRIDGE_GPIO_STRAP ) {
         return (uint64_t) s->strap_mode;
     }
@@ -156,7 +167,7 @@ static void esp32_simulide_bridge_init(Object *obj)
     unsigned i;
 
     s->n_ranges = n;
-    s->strap_mode = 1; /* SPI boot (GPIO0 strapped high) */
+    s->strap_mode = ESP32_SIMULIDE_BRIDGE_STRAP_SPI_BOOT; /* SPI boot */
 
     for( i = 0; i < n; i++ ) {
         MemoryRegion *iomem = g_new(MemoryRegion, 1);
