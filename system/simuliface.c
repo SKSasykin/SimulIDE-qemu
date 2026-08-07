@@ -47,7 +47,7 @@ static uint64_t s_simuTime;   // last time signaled to SimulIDE (monotonic)
 static uint64_t s_nextEvent;  // next scheduled SIM_EVENT tick (ps)
 
 #define SIMULIDE_IOMEM_BASE 0x3FF00000
-#define SIMULIDE_TICK_PS   1000000ull // 1 us between SIM_EVENT ticks
+#define SIMULIDE_TICK_PS   1000000000ull // 1 ms between SIM_EVENT ticks
 
 uint64_t getQemu_ps(void)
 {
