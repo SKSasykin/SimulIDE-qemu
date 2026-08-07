@@ -133,11 +133,24 @@ static const Esp32SimulideBridgeMap esp32c3_simulide_bridge_maps[] = {
     { DR_REG_UART1_BASE + 0x00000000, 0x00010000 }, /* UART1           */
 };
 
+/* ESP8266: UART0/GPIO/UART1. Offsets are IOMEM offsets relative to
+ * 0x60000000 (SimulIDE's Esp8266 class IOMEM_BASE). Keep in sync with
+ * src/microsim/cores/qemu/esp8266/esp8266.cpp in the SimulIDE sources. */
+static const Esp32SimulideBridgeMap esp8266_simulide_bridge_maps[] = {
+    { 0x60000000, 0x0000 }, /* UART0 */
+    { 0x60000300, 0x0300 }, /* GPIO  */
+    { 0x60000F00, 0x0F00 }, /* UART1 */
+};
+
 /* GPIO_STRAP offset inside the GPIO block (0x44000 + 0x38). */
 #define ESP32_SIMULIDE_BRIDGE_GPIO_STRAP 0x00044038
 /* S3/C3 GPIO block is at 0x60004000, so full IOMEM offset is 0x4038. */
 #define ESP32S3_SIMULIDE_BRIDGE_GPIO_STRAP 0x00004038
 #define ESP32C3_SIMULIDE_BRIDGE_GPIO_STRAP 0x00004038
+
+/* ESP8266 GPIO_STRAP is at GPIO_BASE(0x0300) + 0x20, a full IOMEM offset. */
+#define ESP8266_SIMULIDE_BRIDGE_GPIO_STRAP 0x00000320
+#define ESP8266_SIMULIDE_BRIDGE_STRAP_SPI_BOOT 0x12
 
 static uint64_t esp32_simulide_bridge_read(void *opaque, hwaddr offset,
                                            unsigned size)
@@ -249,6 +262,16 @@ static void esp32c3_simulide_bridge_init(Object *obj)
         ESP32C3_SIMULIDE_BRIDGE_STRAP_SPI_BOOT );
 }
 
+static void esp8266_simulide_bridge_init(Object *obj)
+{
+    esp32_simulide_bridge_init_common(
+        obj, TYPE_ESP8266_SIMULIDE_BRIDGE,
+        esp8266_simulide_bridge_maps, ARRAY_SIZE( esp8266_simulide_bridge_maps ),
+        0x10000,
+        ESP8266_SIMULIDE_BRIDGE_GPIO_STRAP,
+        ESP8266_SIMULIDE_BRIDGE_STRAP_SPI_BOOT );
+}
+
 static void esp32_simulide_bridge_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
@@ -281,11 +304,20 @@ static const TypeInfo esp32c3_simulide_bridge_info = {
     .class_init = esp32_simulide_bridge_class_init,
 };
 
+static const TypeInfo esp8266_simulide_bridge_info = {
+    .name = TYPE_ESP8266_SIMULIDE_BRIDGE,
+    .parent = TYPE_SYS_BUS_DEVICE,
+    .instance_size = sizeof(Esp32SimulideBridgeState),
+    .instance_init = esp8266_simulide_bridge_init,
+    .class_init = esp32_simulide_bridge_class_init,
+};
+
 static void esp32_simulide_bridge_register_types(void)
 {
     type_register_static(&esp32_simulide_bridge_info);
     type_register_static(&esp32s3_simulide_bridge_info);
     type_register_static(&esp32c3_simulide_bridge_info);
+    type_register_static(&esp8266_simulide_bridge_info);
 }
 
 type_init(esp32_simulide_bridge_register_types);
@@ -322,4 +354,10 @@ void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem)
 {
     esp32_simulide_bridge_create_common( sys_mem,
                                          TYPE_ESP32C3_SIMULIDE_BRIDGE );
+}
+
+void esp8266_simulide_bridge_create(MemoryRegion *sys_mem)
+{
+    esp32_simulide_bridge_create_common( sys_mem,
+                                         TYPE_ESP8266_SIMULIDE_BRIDGE );
 }

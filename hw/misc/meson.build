@@ -161,6 +161,10 @@ system_ss.add(when: 'CONFIG_RISCV_ESP32C3', if_true: files(
   'esp32-simulide-bridge.c'
 ))
 
+system_ss.add(when: 'CONFIG_XTENSA_ESP8266', if_true: files(
+  'esp32-simulide-bridge.c'
+))
+
 system_ss.add(when: 'CONFIG_XTENSA_ESP32S3', if_true: files(
   'esp32s3_cache.c',
   'ssi_psram.c',

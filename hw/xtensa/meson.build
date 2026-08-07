@@ -13,5 +13,8 @@ xtensa_ss.add(when: 'CONFIG_XTENSA_ESP32S3', if_true: files(
   'esp32s3_intc.c',
   'esp32s3.c',
 ))
+xtensa_ss.add(when: 'CONFIG_XTENSA_ESP8266', if_true: files(
+  'esp8266.c',
+))
 
 hw_arch += {'xtensa': xtensa_ss}
