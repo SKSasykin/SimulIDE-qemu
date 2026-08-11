@@ -172,8 +172,15 @@ int simuMain( int argc, char** argv )
 
     m_arena = (qemuArena_t*)arena;
 
-    // SimulIDE reads ps_per_inst (e.g. SPI clock): default ESP32 240 MHz
-    m_arena->ps_per_inst = 1e12/240e6;
+    // SimulIDE and icount read ps_per_inst. Default to ESP32's 40 MHz
+    // startup clock; the UI can override this with SIMULIDE_QEMU_FREQ_HZ.
+    m_arena->ps_per_inst = 1e12/40e6;
+    const char* emu_freq = getenv( "SIMULIDE_QEMU_FREQ_HZ" );
+    if( emu_freq && emu_freq[0] )
+    {
+        double freq = strtod( emu_freq, NULL );
+        if( freq > 0 ) m_arena->ps_per_inst = 1e12/freq;
+    }
 
     //------------------------------------------------------------------
 
