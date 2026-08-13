@@ -17,6 +17,7 @@
 #if defined( __linux__ ) || defined( __APPLE__ )
 #include <sys/mman.h>
 #include <sys/shm.h>
+#include <pthread.h>
 //#elif defined(_WIN32)
 //#include <windows.h>
 #endif
@@ -45,6 +46,31 @@ QEMUTimer* qtimer;
 
 static uint64_t s_simuTime;   // last time signaled to SimulIDE (monotonic)
 static uint64_t s_nextEvent;  // next scheduled SIM_EVENT tick (ps)
+
+// Watchdog: if the SimulIDE parent process dies (app killed/crashed) qemu
+// would spin forever waiting for the arena, so exit once orphaned.
+#if defined( __linux__ ) || defined( __APPLE__ )
+static void* parent_watchdog( void* arg )
+{
+    (void)arg;
+    for( ;; )
+    {
+        sleep( 2 );
+        if( getppid() == 1 ) _exit( 0 );
+    }
+    return NULL;
+}
+
+static void start_parent_watchdog( void )
+{
+    pthread_t thr;
+    pthread_attr_t attr;
+    pthread_attr_init( &attr );
+    pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
+    if( pthread_create( &thr, &attr, parent_watchdog, NULL ) == 0 )
+        printf("Qemu: parent watchdog started\n");
+}
+#endif
 
 #define SIMULIDE_IOMEM_BASE 0x3FF00000
 #define SIMULIDE_TICK_PS   1000000000ull // 1 ms between SIM_EVENT ticks
@@ -208,6 +234,9 @@ int simuMain( int argc, char** argv )
     scheduleNextEvent();
 
     printf("Qemu: starting main loop\n");fflush( stdout );
+#if defined( __linux__ ) || defined( __APPLE__ )
+    start_parent_watchdog();
+#endif
     int status = qemu_main_loop();
     qemu_cleanup( status );
 
