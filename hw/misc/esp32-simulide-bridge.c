@@ -135,6 +135,7 @@ static const Esp32SimulideBridgeMap esp32s3_simulide_bridge_maps[] = {
     { DR_REG_I2C1_EXT_BASE + 0x00000000, 0x00027000, 0x200 }, /* I2C1    */
     { DR_REG_UART2_BASE + 0x00000000, 0x0002E000 }, /* UART2           */
     { DR_REG_SENS_BASE + 0x00000000, 0x00008800, 0x200 }, /* SENS (SAR ADC) */
+    { DR_REG_LEDC_BASE + 0x00000000, 0x00019000 }, /* LEDC            */
 };
 
 /* ESP32-C3: same approach as the S3. */
@@ -145,6 +146,7 @@ static const Esp32SimulideBridgeMap esp32c3_simulide_bridge_maps[] = {
     { DR_REG_I2C_EXT_BASE + 0x00000000, 0x00013000, 0x200 }, /* I2C0     */
     { DR_REG_SPI2_BASE + 0x00000000, 0x00024000 }, /* GP-SPI2          */
     { DR_REG_APB_SARADC_BASE + 0x00000000, 0x00040000 }, /* APB_SARADC (SAR ADC) */
+    { DR_REG_LEDC_BASE + 0x00000000, 0x00019000 }, /* LEDC            */
 };
 
 /* ESP8266: modeled peripheral offsets are relative to
