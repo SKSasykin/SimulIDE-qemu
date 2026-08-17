@@ -903,7 +903,7 @@ static void esp32s3_machine_init(MachineState *machine)
         }
     }
 
-    esp32s3_simulide_bridge_create(sys_mem);
+    esp32s3_simulide_bridge_create(sys_mem, DEVICE(&ss->intmatrix));
 }
 
 
@@ -954,4 +954,3 @@ static void esp32s3_machine_type_init(void)
 }
 
 type_init(esp32s3_machine_type_init);
-

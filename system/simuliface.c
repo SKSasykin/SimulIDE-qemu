@@ -75,6 +75,15 @@ static void start_parent_watchdog( void )
 #define SIMULIDE_IOMEM_BASE 0x3FF00000
 #define SIMULIDE_TICK_PS   1000000000ull // 1 ms between SIM_EVENT ticks
 
+static simulide_interrupt_handler s_interrupt_handler;
+static void *s_interrupt_opaque;
+
+void simulide_set_interrupt_handler(simulide_interrupt_handler handler, void *opaque)
+{
+    s_interrupt_handler = handler;
+    s_interrupt_opaque = opaque;
+}
+
 uint64_t getQemu_ps(void)
 {
     uint64_t qemuTime = icount_get_ps();
@@ -105,6 +114,13 @@ void simulide_signal( uint64_t action, uint64_t time_ps )
     m_arena->simuTime   = time_ps;
     s_simuTime          = time_ps;
     simulide_wait();
+    if( m_arena->qemuAction == SIM_INTERRUPT && s_interrupt_handler )
+    {
+        uint64_t number = m_arena->irqNumber;
+        uint64_t level = m_arena->irqLevel;
+        m_arena->qemuAction = SIM_NONE;
+        s_interrupt_handler(number, level, s_interrupt_opaque);
+    }
 }
 
 uint32_t simulide_bridge_read( uint32_t addr )

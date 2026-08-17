@@ -19,9 +19,9 @@
 #define TYPE_ESP8266_SIMULIDE_BRIDGE "esp8266-simulide-bridge"
 #define ESP32_SIMULIDE_BRIDGE_MAX_RANGES 16
 
-void esp32_simulide_bridge_create(MemoryRegion *sys_mem);
-void esp32s3_simulide_bridge_create(MemoryRegion *sys_mem);
-void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem);
+void esp32_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix);
+void esp32s3_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix);
+void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix);
 void esp8266_simulide_bridge_create(MemoryRegion *sys_mem);
 
 #endif

@@ -27,6 +27,7 @@
 #include "qemu/error-report.h"
 #include "qapi/error.h"
 #include "hw/qdev-properties.h"
+#include "hw/irq.h"
 #include "hw/sysbus.h"
 #include "hw/misc/esp32_reg.h"
 #include "hw/misc/esp32s3_reg.h"
@@ -59,6 +60,7 @@ typedef struct Esp32SimulideBridgeState {
     uint32_t      iomem_size;    /* SimulIDE IOMEM window size               */
     uint32_t      strap_offset;  /* full IOMEM offset of the GPIO_STRAP reg  */
     uint32_t      strap_mode;
+    DeviceState  *intmatrix;
 } Esp32SimulideBridgeState;
 
 #define ESP32_SIMULIDE_BRIDGE(obj) \
@@ -115,6 +117,8 @@ static const Esp32SimulideBridgeMap esp32_simulide_bridge_maps[] = {
     { APB_REG_BASE + 0x00000000,                0x00040000 }, /* UART0 AHB FIFO    */
     { APB_REG_BASE + 0x00010000,                0x00050000 }, /* UART1 AHB FIFO    */
     { APB_REG_BASE + 0x0002E000,                0x0006E000 }, /* UART2 AHB FIFO    */
+    { APB_REG_BASE + 0x0001301C,                0x0005301C, 4 }, /* I2C0 TX FIFO */
+    { APB_REG_BASE + 0x0002701C,                0x0006701C, 4 }, /* I2C1 TX FIFO */
 };
 
 /* ESP32-S3: only the ranges SimulIDE models are shadowed.
@@ -334,14 +338,26 @@ static void esp32_simulide_bridge_register_types(void)
 
 type_init(esp32_simulide_bridge_register_types);
 
+static void esp32_simulide_bridge_interrupt(uint64_t number, uint64_t level,
+                                            void *opaque)
+{
+    Esp32SimulideBridgeState *s = opaque;
+    if( s->intmatrix ) {
+        qemu_set_irq(qdev_get_gpio_in(s->intmatrix, number), level);
+    }
+}
+
 static void esp32_simulide_bridge_create_common(MemoryRegion *sys_mem,
-                                                const char *type_name)
+                                                 const char *type_name,
+                                                 DeviceState *intmatrix)
 {
     Esp32SimulideBridgeState *s =
         (Esp32SimulideBridgeState *)qdev_new( type_name );
     unsigned i;
 
     sysbus_realize_and_unref( SYS_BUS_DEVICE( DEVICE(s) ), &error_fatal );
+    s->intmatrix = intmatrix;
+    simulide_set_interrupt_handler(esp32_simulide_bridge_interrupt, s);
 
     for( i = 0; i < s->n_ranges; i++ ) {
         memory_region_add_subregion_overlap( sys_mem,
@@ -350,26 +366,26 @@ static void esp32_simulide_bridge_create_common(MemoryRegion *sys_mem,
     }
 }
 
-void esp32_simulide_bridge_create(MemoryRegion *sys_mem)
+void esp32_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix)
 {
     esp32_simulide_bridge_create_common( sys_mem,
-                                         TYPE_ESP32_SIMULIDE_BRIDGE );
+                                         TYPE_ESP32_SIMULIDE_BRIDGE, intmatrix );
 }
 
-void esp32s3_simulide_bridge_create(MemoryRegion *sys_mem)
+void esp32s3_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix)
 {
     esp32_simulide_bridge_create_common( sys_mem,
-                                         TYPE_ESP32S3_SIMULIDE_BRIDGE );
+                                         TYPE_ESP32S3_SIMULIDE_BRIDGE, intmatrix );
 }
 
-void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem)
+void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix)
 {
     esp32_simulide_bridge_create_common( sys_mem,
-                                         TYPE_ESP32C3_SIMULIDE_BRIDGE );
+                                         TYPE_ESP32C3_SIMULIDE_BRIDGE, intmatrix );
 }
 
 void esp8266_simulide_bridge_create(MemoryRegion *sys_mem)
 {
     esp32_simulide_bridge_create_common( sys_mem,
-                                         TYPE_ESP8266_SIMULIDE_BRIDGE );
+                                         TYPE_ESP8266_SIMULIDE_BRIDGE, NULL );
 }

@@ -648,7 +648,7 @@ static void esp32c3_machine_init(MachineState *machine)
         memory_region_add_subregion_overlap(sys_mem, esp32c3_memmap[ESP32C3_MEMREGION_FRAMEBUF].base, &ms->rgb.vram, 0);
     }
 
-    esp32c3_simulide_bridge_create(sys_mem);
+    esp32c3_simulide_bridge_create(sys_mem, DEVICE(&ms->intmatrix));
 }
 
 

@@ -823,7 +823,7 @@ static void esp32_machine_init(MachineState *machine)
     esp32_machine_init_sd( ss );
 
     /* SimulIDE owns the whole IOMEM range: shadow all peripherals */
-    esp32_simulide_bridge_create( get_system_memory() );
+    esp32_simulide_bridge_create( get_system_memory(), DEVICE(&ss->intmatrix) );
 
     /* Need MMU initialized prior to ELF loading,
      * so that ELF gets loaded into virtual addresses

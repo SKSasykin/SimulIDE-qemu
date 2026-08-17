@@ -76,6 +76,8 @@ enum arm32Actions{
 #define time   simuTime
 
 extern volatile qemuArena_t* m_arena;
+typedef void (*simulide_interrupt_handler)(uint64_t number, uint64_t level, void *opaque);
+void simulide_set_interrupt_handler(simulide_interrupt_handler handler, void *opaque);
 // ------------------------------------------------
 
 extern uint64_t m_timeout;
