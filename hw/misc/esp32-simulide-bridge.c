@@ -117,7 +117,7 @@ static const Esp32SimulideBridgeMap esp32_simulide_bridge_maps[] = {
     { APB_REG_BASE + 0x0002E000,                0x0006E000 }, /* UART2 AHB FIFO    */
 };
 
-/* ESP32-S3: only the ranges SimulIDE models (UARTs + GPIO) are shadowed.
+/* ESP32-S3: only the ranges SimulIDE models are shadowed.
  * SPI0/SPI1 (0x60002000/0x60003000) are left to the real models because
  * the boot ROM needs them to load the flash firmware. Offsets are IOMEM
  * offsets relative to 0x60000000. Keep in sync with Esp32s3 class. */
@@ -125,23 +125,30 @@ static const Esp32SimulideBridgeMap esp32s3_simulide_bridge_maps[] = {
     { DR_REG_UART_BASE + 0x00000000, 0x00000000 }, /* UART0            */
     { DR_REG_GPIO_BASE + 0x00000000, 0x00004000 }, /* GPIO             */
     { DR_REG_UART1_BASE + 0x00000000, 0x00010000 }, /* UART1           */
+    { DR_REG_I2C_EXT_BASE + 0x00000000, 0x00013000, 0x200 }, /* I2C0     */
+    { DR_REG_SPI2_BASE + 0x00000000, 0x00024000 }, /* GP-SPI2          */
+    { DR_REG_SPI3_BASE + 0x00000000, 0x00025000 }, /* GP-SPI3          */
+    { DR_REG_I2C1_EXT_BASE + 0x00000000, 0x00027000, 0x200 }, /* I2C1    */
     { DR_REG_UART2_BASE + 0x00000000, 0x0002E000 }, /* UART2           */
     { DR_REG_SENS_BASE + 0x00000000, 0x00008800, 0x200 }, /* SENS (SAR ADC) */
 };
 
-/* ESP32-C3: same approach as the S3 (UARTs + GPIO only). */
+/* ESP32-C3: same approach as the S3. */
 static const Esp32SimulideBridgeMap esp32c3_simulide_bridge_maps[] = {
     { DR_REG_UART_BASE + 0x00000000, 0x00000000 }, /* UART0            */
     { DR_REG_GPIO_BASE + 0x00000000, 0x00004000 }, /* GPIO             */
     { DR_REG_UART1_BASE + 0x00000000, 0x00010000 }, /* UART1           */
+    { DR_REG_I2C_EXT_BASE + 0x00000000, 0x00013000, 0x200 }, /* I2C0     */
+    { DR_REG_SPI2_BASE + 0x00000000, 0x00024000 }, /* GP-SPI2          */
     { DR_REG_APB_SARADC_BASE + 0x00000000, 0x00040000 }, /* APB_SARADC (SAR ADC) */
 };
 
-/* ESP8266: UART0/GPIO/SAR ADC/UART1. Offsets are IOMEM offsets relative to
+/* ESP8266: modeled peripheral offsets are relative to
  * 0x60000000 (SimulIDE's Esp8266 class IOMEM_BASE). Keep in sync with
  * src/microsim/cores/qemu/esp8266/esp8266.cpp in the SimulIDE sources. */
 static const Esp32SimulideBridgeMap esp8266_simulide_bridge_maps[] = {
     { 0x60000000, 0x0000, 0x100 }, /* UART0   */
+    { 0x60000100, 0x0100, 0x100 }, /* HSPI    */
     { 0x60000300, 0x0300, 0x100 }, /* GPIO    */
     { 0x60000D00, 0x0D00, 0x100 }, /* SAR ADC */
     { 0x60000F00, 0x0F00, 0x100 }, /* UART1   */
