@@ -128,6 +128,7 @@ static const Esp32SimulideBridgeMap esp32_simulide_bridge_maps[] = {
 static const Esp32SimulideBridgeMap esp32s3_simulide_bridge_maps[] = {
     { DR_REG_UART_BASE + 0x00000000, 0x00000000 }, /* UART0            */
     { DR_REG_GPIO_BASE + 0x00000000, 0x00004000 }, /* GPIO             */
+    { DR_REG_IO_MUX_BASE + 0x00000000, 0x00009000 }, /* IO_MUX         */
     { DR_REG_UART1_BASE + 0x00000000, 0x00010000 }, /* UART1           */
     { DR_REG_I2C_EXT_BASE + 0x00000000, 0x00013000, 0x200 }, /* I2C0     */
     { DR_REG_SPI2_BASE + 0x00000000, 0x00024000 }, /* GP-SPI2          */
@@ -142,6 +143,7 @@ static const Esp32SimulideBridgeMap esp32s3_simulide_bridge_maps[] = {
 static const Esp32SimulideBridgeMap esp32c3_simulide_bridge_maps[] = {
     { DR_REG_UART_BASE + 0x00000000, 0x00000000 }, /* UART0            */
     { DR_REG_GPIO_BASE + 0x00000000, 0x00004000 }, /* GPIO             */
+    { DR_REG_IO_MUX_BASE + 0x00000000, 0x00009000 }, /* IO_MUX         */
     { DR_REG_UART1_BASE + 0x00000000, 0x00010000 }, /* UART1           */
     { DR_REG_I2C_EXT_BASE + 0x00000000, 0x00013000, 0x200 }, /* I2C0     */
     { DR_REG_SPI2_BASE + 0x00000000, 0x00024000 }, /* GP-SPI2          */
