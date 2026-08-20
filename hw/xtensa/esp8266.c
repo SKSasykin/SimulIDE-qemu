@@ -24,7 +24,7 @@
 #include "hw/qdev-properties.h"
 #include "hw/char/esp32_uart.h"
 #include "hw/gpio/esp8266_gpio.h"
-#include "hw/timer/esp32_frc_timer.h"
+#include "hw/timer/esp8266_frc1.h"
 #include "hw/misc/esp32_simulide_bridge.h"
 #include "hw/misc/unimp.h"
 #include "core-lx106/core-isa.h"
@@ -45,17 +45,13 @@ struct Esp8266MachineState {
     MachineState parent;
     XtensaCPU *cpu;
     DeviceState *uart[2];
-    MemoryRegion *iram;
     uint32_t fw_entry;
 };
 
 /* The user application is loaded at the start of the IRAM, there is
  * no boot ROM in the machine. */
 #define ESP8266_IRAM_BASE   0x40000000
-#define ESP8266_IRAM_SIZE   0x100000
-
-#define ESP8266_DRAM_BASE   0x3ffe8000
-#define ESP8266_DRAM_SIZE   0x14000
+#define ESP8266_RAW_MAX     0x100000
 
 #define ESP8266_UART0_BASE  0x60000000
 #define ESP8266_UART1_BASE  0x60000f00
@@ -77,7 +73,46 @@ static void esp8266_reset(void *opaque)
 
     cpu_reset(CPU(ms->cpu));
     /* No boot ROM: jump straight into the user firmware. */
+    ms->cpu->env.sregs[PS] = PS_UM;
     ms->cpu->env.pc = ms->fw_entry;
+}
+
+static bool esp8266_load_image(const uint8_t *image, size_t image_size,
+                               AddressSpace *as, uint64_t *entry)
+{
+    if (image_size < 8 || image[0] != 0xe9) {
+        return false;
+    }
+
+    uint8_t segment_count = image[1];
+    if (!segment_count || segment_count > 16) {
+        error_report("Invalid ESP8266 image segment count %u", segment_count);
+        exit(1);
+    }
+
+    *entry = ldl_le_p(image + 4);
+    size_t offset = 8;
+    for (unsigned i = 0; i < segment_count; ++i) {
+        if (offset + 8 > image_size) {
+            error_report("Truncated ESP8266 image segment header");
+            exit(1);
+        }
+
+        uint32_t address = ldl_le_p(image + offset);
+        uint32_t length = ldl_le_p(image + offset + 4);
+        offset += 8;
+        if (length > 16 * MiB || offset + length > image_size) {
+            error_report("Invalid ESP8266 image segment %u length %u", i,
+                         length);
+            exit(1);
+        }
+
+        char *name = g_strdup_printf("esp8266.segment.%u", i);
+        rom_add_blob_fixed_as(name, image + offset, length, address, as);
+        g_free(name);
+        offset += length;
+    }
+    return true;
 }
 
 static void esp8266_machine_init(MachineState *machine)
@@ -93,10 +128,10 @@ static void esp8266_machine_init(MachineState *machine)
      * so that ELF gets loaded into virtual addresses */
     esp8266_reset(ms);
 
-    /* Create the local memories described by the lx106 core config.
-     * instram is replaced by our own IRAM region below (firmware target),
-     * the instrom region is where the flash is mapped on the real chip. */
+    /* Create the local memories described by the LX106 core config. */
     xtensa_create_memory_regions(&ms->cpu->env.config->instrom, "esp8266.instrom",
+                                 get_system_memory());
+    xtensa_create_memory_regions(&ms->cpu->env.config->instram, "esp8266.instram",
                                  get_system_memory());
     xtensa_create_memory_regions(&ms->cpu->env.config->datarom, "esp8266.datarom",
                                  get_system_memory());
@@ -106,18 +141,6 @@ static void esp8266_machine_init(MachineState *machine)
                                  get_system_memory());
     xtensa_create_memory_regions(&ms->cpu->env.config->sysram, "esp8266.sysram",
                                  get_system_memory());
-
-    /* IRAM at the start of the instruction RAM, firmware is loaded here */
-    ms->iram = g_new(MemoryRegion, 1);
-    memory_region_init_ram(ms->iram, NULL, "esp8266.iram",
-                           ESP8266_IRAM_SIZE, &error_fatal);
-    memory_region_add_subregion(get_system_memory(), ESP8266_IRAM_BASE, ms->iram);
-
-    /* DRAM at the address used by the real chip */
-    MemoryRegion *dram = g_new(MemoryRegion, 1);
-    memory_region_init_ram(dram, NULL, "esp8266.dram",
-                           ESP8266_DRAM_SIZE, &error_fatal);
-    memory_region_add_subregion(get_system_memory(), ESP8266_DRAM_BASE, dram);
 
     /* UARTs: reuse the ESP32 UART model, register layout matches */
     for (int i = 0; i < 2; ++i) {
@@ -137,9 +160,11 @@ static void esp8266_machine_init(MachineState *machine)
     memory_region_add_subregion(get_system_memory(), ESP8266_GPIO_BASE,
                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(gpio), 0));
 
-    /* FRC1 timer at 0x60000600 (matches the ESP32 FRC timer layout) */
-    DeviceState *frc = qdev_new(TYPE_ESP32_FRC_TIMER);
+    /* FRC1 is a 23-bit countdown timer; external input 7 maps to IRQ 9. */
+    DeviceState *frc = qdev_new(TYPE_ESP8266_FRC1);
     sysbus_realize_and_unref(SYS_BUS_DEVICE(frc), &error_fatal);
+    sysbus_connect_irq(SYS_BUS_DEVICE(frc), 0,
+                       xtensa_get_extints(&ms->cpu->env)[7]);
     /* Priority 2 so the FRC wins over the SimulIDE bridge (priority 1),
      * whose UART0 range (0x60000000..0x60000FFF) would otherwise shadow it */
     memory_region_add_subregion_overlap(get_system_memory(), ESP8266_FRC_BASE,
@@ -150,49 +175,38 @@ static void esp8266_machine_init(MachineState *machine)
 
     uint64_t entry = ESP8266_IRAM_BASE;
 
-    /* Firmware: prefer an if=mtd drive (SimulIDE-style), raw image is
-     * loaded at the start of the IRAM. As a fallback support -bios/-kernel. */
-    DriveInfo *dinfo = drive_get(IF_MTD, 0, 0);
-    if (dinfo) {
-        BlockBackend *blk = blk_by_legacy_dinfo(dinfo);
-        int64_t fw_size = blk_getlength(blk);
-        if (fw_size <= 0) {
-            error_report("Error: could not read flash image size");
-            exit(1);
-        }
-        if (fw_size > ESP8266_IRAM_SIZE) {
-            error_report("Error: flash image (%" PRId64 " bytes) larger than "
-                         "IRAM (%d bytes); only images up to 1 MB are "
-                         "supported",
-                         fw_size, ESP8266_IRAM_SIZE);
-            exit(1);
-        }
-        int size = blk_pread(blk, 0, fw_size, memory_region_get_ram_ptr(ms->iram), 0);
-        if (size != fw_size) {
-            error_report("Error: could not load flash image");
-            exit(1);
-        }
-        entry = ESP8266_IRAM_BASE;
-    } else if (machine->firmware || machine->kernel_filename) {
+    /* Firmware may be an ELF, an Espressif 0xe9 image, or a self-contained
+     * flat IRAM blob. */
+    if (machine->firmware || machine->kernel_filename) {
         const char *fw = machine->firmware ? machine->firmware
                                            : machine->kernel_filename;
         int size = load_elf(fw, NULL, translate_phys_addr, ms->cpu,
                             &entry, NULL, NULL, NULL, TARGET_BIG_ENDIAN,
                             EM_XTENSA, 0, 0);
         if (size < 0) {
-            /* not an ELF, load as raw binary into the IRAM */
-            size = load_image_targphys_as(fw, ESP8266_IRAM_BASE,
-                                          ESP8266_IRAM_SIZE,
-                                          CPU(ms->cpu)->as);
-            if (size < 0) {
-                error_report("Error: could not load firmware '%s'", fw);
+            g_autofree char *image = NULL;
+            gsize image_size = 0;
+            g_autoptr(GError) error = NULL;
+            if (!g_file_get_contents(fw, &image, &image_size, &error)) {
+                error_report("Error: could not read firmware '%s': %s", fw,
+                             error->message);
                 exit(1);
             }
-            entry = ESP8266_IRAM_BASE;
+            if (!esp8266_load_image((uint8_t *)image, image_size,
+                                    CPU(ms->cpu)->as, &entry)) {
+                if (image_size > ESP8266_RAW_MAX) {
+                    error_report("Error: firmware image (%zu bytes) larger "
+                                 "than IRAM (%d bytes)", image_size,
+                                 ESP8266_RAW_MAX);
+                    exit(1);
+                }
+                rom_add_blob_fixed_as("esp8266.raw", image, image_size,
+                                      ESP8266_IRAM_BASE, CPU(ms->cpu)->as);
+                entry = ESP8266_IRAM_BASE;
+            }
         }
     } else {
-        error_report("Error: no firmware specified, use -drive "
-                     "file=<fw>,if=mtd or -bios <fw>");
+        error_report("Error: no firmware specified, use -bios <fw>");
         exit(1);
     }
 
