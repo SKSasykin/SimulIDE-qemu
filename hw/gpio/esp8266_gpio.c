@@ -43,6 +43,8 @@ static uint64_t esp8266_gpio_read(void *opaque, hwaddr addr, unsigned int size)
     case GPIO_IN:       r = gpioS->gpio_in;       break;
     case GPIO_STATUS:   r = gpioS->gpio_status;   break;
     case GPIO_STRAP:    r = gpioS->strap_mode;    break;
+    case 0x80:          r = gpioS->user_entry;
+        break;
     default:
         qemu_log_mask(LOG_GUEST_ERROR, "%s: unknown read addr=0x%"
                       HWADDR_PRIx "\n", __func__, addr);
@@ -95,13 +97,16 @@ static const MemoryRegionOps esp8266_gpio_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
 };
 
+/* Reference QEMU: (0x3 << 16) | (0x7 << 29) = flash-boot + drive strength */
+#define ESP8266_GPIO_STRAP_BOOT_VALUE ((0x3 << 16) | (0x7 << 29))
+
 static void esp8266_gpio_reset(DeviceState *dev)
 {
     Esp8266GpioState *gpioS = ESP8266_GPIO(dev);
 
     gpioS->gpio_out    = 0;
     gpioS->gpio_enable = 0;
-    gpioS->gpio_in     = 0;
+    gpioS->gpio_in     = ESP8266_GPIO_STRAP_BOOT_VALUE;
     gpioS->gpio_status = 0;
     gpioS->strap_mode  = ESP8266_STRAP_MODE_SPI_BOOT;
 }
@@ -112,7 +117,7 @@ static void esp8266_gpio_init(Object *obj)
     SysBusDevice *sbd = SYS_BUS_DEVICE(obj);
 
     memory_region_init_io(&gpioS->iomem, obj, &esp8266_gpio_ops, gpioS,
-                          TYPE_ESP8266_GPIO, 0x1000);
+                          TYPE_ESP8266_GPIO, 0x100);
     sysbus_init_mmio(sbd, &gpioS->iomem);
     sysbus_init_irq(sbd, &gpioS->irq);
 }
@@ -120,6 +125,7 @@ static void esp8266_gpio_init(Object *obj)
 static Property esp8266_gpio_properties[] = {
     DEFINE_PROP_UINT32("strap_mode", Esp8266GpioState, strap_mode,
                        ESP8266_STRAP_MODE_SPI_BOOT),
+    DEFINE_PROP_UINT32("user_entry", Esp8266GpioState, user_entry, 0),
     DEFINE_PROP_END_OF_LIST(),
 };
 

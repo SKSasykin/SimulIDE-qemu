@@ -18,4 +18,5 @@ typedef struct Esp8266GpioState {
     uint32_t gpio_in;
     uint32_t gpio_status;
     uint32_t strap_mode;
+    uint32_t user_entry;
 } Esp8266GpioState;

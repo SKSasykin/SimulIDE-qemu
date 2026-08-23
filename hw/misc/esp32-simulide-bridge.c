@@ -60,6 +60,7 @@ typedef struct Esp32SimulideBridgeState {
     uint32_t      iomem_size;    /* SimulIDE IOMEM window size               */
     uint32_t      strap_offset;  /* full IOMEM offset of the GPIO_STRAP reg  */
     uint32_t      strap_mode;
+    uint32_t      user_entry;    /* ESP8266 boot cheat: entry for the app    */
     DeviceState  *intmatrix;
 } Esp32SimulideBridgeState;
 
@@ -192,6 +193,12 @@ static uint64_t esp32_simulide_bridge_read(void *opaque, hwaddr offset,
     if( full == s->strap_offset ) {
         return (uint64_t) s->strap_mode;
     }
+    /* ESP8266 ROM handoff cheat: the call-user ROM reads GPIO offset 0x80
+     * (full IOMEM offset 0x380) expecting the application entry point. Our
+     * GPIO device is shadowed by this bridge, so answer it here. */
+    if( s->user_entry != 0 && full == 0x00000380 ) {
+        return (uint64_t) s->user_entry;
+    }
     {
         uint32_t v = (uint32_t) simulide_bridge_read( full );
         return (uint64_t) v;
@@ -209,6 +216,9 @@ static void esp32_simulide_bridge_write(void *opaque, hwaddr offset,
         qemu_log_mask(LOG_GUEST_ERROR, "%s: write out of range offset=0x%"
                       HWADDR_PRIx "\n", __func__, offset);
         return;
+    }
+    if( s->strap_offset == ESP8266_SIMULIDE_BRIDGE_GPIO_STRAP && full == 0 ) {
+        fputc( value & 0xff, stderr );
     }
     simulide_bridge_write( full, (uint32_t) value );
 }
@@ -353,7 +363,8 @@ static void esp32_simulide_bridge_interrupt(uint64_t number, uint64_t level,
 
 static void esp32_simulide_bridge_create_common(MemoryRegion *sys_mem,
                                                  const char *type_name,
-                                                 DeviceState *intmatrix)
+                                                 DeviceState *intmatrix,
+                                                 uint32_t user_entry)
 {
     Esp32SimulideBridgeState *s =
         (Esp32SimulideBridgeState *)qdev_new( type_name );
@@ -361,6 +372,7 @@ static void esp32_simulide_bridge_create_common(MemoryRegion *sys_mem,
 
     sysbus_realize_and_unref( SYS_BUS_DEVICE( DEVICE(s) ), &error_fatal );
     s->intmatrix = intmatrix;
+    s->user_entry = user_entry;
     simulide_set_interrupt_handler(esp32_simulide_bridge_interrupt, s);
 
     for( i = 0; i < s->n_ranges; i++ ) {
@@ -373,23 +385,24 @@ static void esp32_simulide_bridge_create_common(MemoryRegion *sys_mem,
 void esp32_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix)
 {
     esp32_simulide_bridge_create_common( sys_mem,
-                                         TYPE_ESP32_SIMULIDE_BRIDGE, intmatrix );
+                                         TYPE_ESP32_SIMULIDE_BRIDGE, intmatrix, 0 );
 }
 
 void esp32s3_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix)
 {
     esp32_simulide_bridge_create_common( sys_mem,
-                                         TYPE_ESP32S3_SIMULIDE_BRIDGE, intmatrix );
+                                         TYPE_ESP32S3_SIMULIDE_BRIDGE, intmatrix, 0 );
 }
 
 void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix)
 {
     esp32_simulide_bridge_create_common( sys_mem,
-                                         TYPE_ESP32C3_SIMULIDE_BRIDGE, intmatrix );
+                                         TYPE_ESP32C3_SIMULIDE_BRIDGE, intmatrix, 0 );
 }
 
-void esp8266_simulide_bridge_create(MemoryRegion *sys_mem)
+void esp8266_simulide_bridge_create(MemoryRegion *sys_mem, uint32_t user_entry)
 {
     esp32_simulide_bridge_create_common( sys_mem,
-                                         TYPE_ESP8266_SIMULIDE_BRIDGE, NULL );
+                                         TYPE_ESP8266_SIMULIDE_BRIDGE, NULL,
+                                         user_entry );
 }

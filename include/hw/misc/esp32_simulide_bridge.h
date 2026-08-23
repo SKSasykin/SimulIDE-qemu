@@ -22,6 +22,6 @@
 void esp32_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix);
 void esp32s3_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix);
 void esp32c3_simulide_bridge_create(MemoryRegion *sys_mem, DeviceState *intmatrix);
-void esp8266_simulide_bridge_create(MemoryRegion *sys_mem);
+void esp8266_simulide_bridge_create(MemoryRegion *sys_mem, uint32_t user_entry);
 
 #endif
