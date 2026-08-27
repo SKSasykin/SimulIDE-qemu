@@ -53,6 +53,7 @@
 #include "hw/nvram/esp32s3_efuse.h"
 #include "hw/xtensa/esp32s3_clk.h"
 #include "hw/dma/esp32s3_gdma.h"
+#include "hw/dma/esp32_slc.h"
 #include "hw/misc/esp32s3_sha.h"
 #include "hw/misc/esp32s3_aes.h"
 #include "hw/misc/esp32s3_rsa.h"
@@ -902,6 +903,12 @@ static void esp32s3_machine_init(MachineState *machine)
             g_free(rom_binary);
         }
     }
+
+    DeviceState *virtual_wifi = qdev_new(TYPE_ESP32_SLC);
+    qemu_configure_nic_device(virtual_wifi, true, NULL);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(virtual_wifi), &error_fatal);
+    memory_region_add_subregion(sys_mem, 0x60058000,
+                                sysbus_mmio_get_region(SYS_BUS_DEVICE(virtual_wifi), 0));
 
     esp32s3_simulide_bridge_create(sys_mem, DEVICE(&ss->intmatrix));
 }

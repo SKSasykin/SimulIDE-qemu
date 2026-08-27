@@ -37,6 +37,7 @@
 #include "hw/nvram/esp32c3_efuse.h"
 #include "hw/riscv/esp32c3_clk.h"
 #include "hw/riscv/esp32c3_intmatrix.h"
+#include "hw/dma/esp32_slc.h"
 #include "hw/misc/esp32c3_sha.h"
 #include "hw/timer/esp32c3_timg.h"
 #include "hw/timer/esp32c3_systimer.h"
@@ -647,6 +648,12 @@ static void esp32c3_machine_init(MachineState *machine)
         memory_region_add_subregion_overlap(sys_mem, DR_REG_FRAMEBUF_BASE, mr, 0);
         memory_region_add_subregion_overlap(sys_mem, esp32c3_memmap[ESP32C3_MEMREGION_FRAMEBUF].base, &ms->rgb.vram, 0);
     }
+
+    DeviceState *virtual_wifi = qdev_new(TYPE_ESP32_SLC);
+    qemu_configure_nic_device(virtual_wifi, true, NULL);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(virtual_wifi), &error_fatal);
+    memory_region_add_subregion(sys_mem, 0x60058000,
+                                sysbus_mmio_get_region(SYS_BUS_DEVICE(virtual_wifi), 0));
 
     esp32c3_simulide_bridge_create(sys_mem, DEVICE(&ms->intmatrix));
 }

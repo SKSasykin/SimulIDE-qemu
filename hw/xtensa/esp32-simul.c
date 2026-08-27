@@ -524,8 +524,11 @@ static void esp32_soc_realize( DeviceState *dev, Error **errp )
     esp32_soc_add_unimp_device( sys_mem, "esp32.rtcio"  , DR_REG_SENS_BASE    , 0x400  );
 //    esp32_soc_add_unimp_device( sys_mem, "esp32.iomux"  , DR_REG_IO_MUX_BASE  , 0x2000 );
     esp32_soc_add_unimp_device( sys_mem, "esp32.hinf"   , DR_REG_HINF_BASE    , 0x1000 );
+    qemu_configure_nic_device(DEVICE(&s->slc), true, NULL);
     qdev_realize( DEVICE(&s->slc), &s->periph_bus, &error_abort);
     esp32_soc_add_periph_device( sys_mem, &s->slc, DR_REG_SLC_BASE);
+    sysbus_connect_irq( SYS_BUS_DEVICE(&s->slc), 0,
+                        qdev_get_gpio_in(intmatrix_dev, ETS_WIFI_MAC_INTR_SOURCE) );
     esp32_soc_add_unimp_device( sys_mem, "esp32.slchost", DR_REG_SLCHOST_BASE , 0x1000 );
     esp32_soc_add_unimp_device( sys_mem, "esp32.apbctrl", DR_REG_APB_CTRL_BASE, 0x1000 );
     esp32_soc_add_unimp_device( sys_mem, "esp32.i2s0"   , DR_REG_I2S_BASE     , 0x1000 );

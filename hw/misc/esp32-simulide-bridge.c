@@ -120,6 +120,12 @@ static const Esp32SimulideBridgeMap esp32_simulide_bridge_maps[] = {
     { APB_REG_BASE + 0x0002E000,                0x0006E000 }, /* UART2 AHB FIFO    */
     { APB_REG_BASE + 0x0001301C,                0x0005301C, 4 }, /* I2C0 TX FIFO */
     { APB_REG_BASE + 0x0002701C,                0x0006701C, 4 }, /* I2C1 TX FIFO */
+    /* WiFi MAC (WDEV) and BT controller are modeled by SimulIDE's QemuWifi
+     * / QemuBt modules. The exact WiFi MAC base for this fork is 0x3FF30000
+     * (TRM WIFI_MAC region); widen the 0x4000 window in phase 3 if the
+     * driver touches registers beyond it. */
+    { ESP32_SIMULIDE_BRIDGE_BASE + 0x00030000, 0x00030000, 0x4000 }, /* WiFi MAC */
+    { ESP32_SIMULIDE_BRIDGE_BASE + 0x00051000, 0x00051000, 0x1000 }, /* BT ctrl  */
 };
 
 /* ESP32-S3: only the ranges SimulIDE models are shadowed.
@@ -138,6 +144,16 @@ static const Esp32SimulideBridgeMap esp32s3_simulide_bridge_maps[] = {
     { DR_REG_UART2_BASE + 0x00000000, 0x0002E000 }, /* UART2           */
     { DR_REG_SENS_BASE + 0x00000000, 0x00008800, 0x200 }, /* SENS (SAR ADC) */
     { DR_REG_LEDC_BASE + 0x00000000, 0x00019000 }, /* LEDC            */
+    /* BT controller (VHCI) is modeled by SimulIDE's QemuBt module. */
+    { DR_REG_BT_BASE + 0x00000000, 0x00011000, 0x1000 }, /* BT ctrl       */
+    /* WiFi MAC (WDEV): ESP-IDF base 0x60033000 (first of 3 windows
+     * 0x60033000/0x60034000/0x60035000, reverse-engineered; not in the
+     * TRM/SVD). Leave the four-byte hardware RNG register at 0x6003507c to
+     * QEMU's esp32s3_rng device. Shadowing it here returns the zero-filled
+     * shared-arena value, so bootloader_fill_random() generates two zero
+     * obfuscation words and process_segment_data() retries forever. */
+    { 0x60033000, 0x00033000, 0x207c }, /* WiFi MAC before RNG */
+    { 0x60035080, 0x00035080, 0x0f80 }, /* WiFi MAC after RNG  */
 };
 
 /* ESP32-C3: same approach as the S3. */
@@ -150,6 +166,10 @@ static const Esp32SimulideBridgeMap esp32c3_simulide_bridge_maps[] = {
     { DR_REG_SPI2_BASE + 0x00000000, 0x00024000 }, /* GP-SPI2          */
     { DR_REG_APB_SARADC_BASE + 0x00000000, 0x00040000 }, /* APB_SARADC (SAR ADC) */
     { DR_REG_LEDC_BASE + 0x00000000, 0x00019000 }, /* LEDC            */
+    /* WiFi MAC (WDEV): ESP-IDF base 0x60033000 (same RISC-V WiFi window
+     * layout as the S3). Modeled by SimulIDE's QemuWifi module. The C3
+     * has no BT controller, so no BT row here. */
+    { 0x60033000, 0x00033000, 0x3000 }, /* WiFi MAC */
 };
 
 /* ESP8266: modeled peripheral offsets are relative to
@@ -264,6 +284,8 @@ static void esp32_simulide_bridge_init_common(
 
 static void esp32_simulide_bridge_init(Object *obj)
 {
+    QEMU_BUILD_BUG_ON(ARRAY_SIZE(esp32_simulide_bridge_maps) >
+                      ESP32_SIMULIDE_BRIDGE_MAX_RANGES);
     esp32_simulide_bridge_init_common(
         obj, TYPE_ESP32_SIMULIDE_BRIDGE,
         esp32_simulide_bridge_maps, ARRAY_SIZE( esp32_simulide_bridge_maps ),
@@ -274,6 +296,8 @@ static void esp32_simulide_bridge_init(Object *obj)
 
 static void esp32s3_simulide_bridge_init(Object *obj)
 {
+    QEMU_BUILD_BUG_ON(ARRAY_SIZE(esp32s3_simulide_bridge_maps) >
+                      ESP32_SIMULIDE_BRIDGE_MAX_RANGES);
     esp32_simulide_bridge_init_common(
         obj, TYPE_ESP32S3_SIMULIDE_BRIDGE,
         esp32s3_simulide_bridge_maps, ARRAY_SIZE( esp32s3_simulide_bridge_maps ),
@@ -284,6 +308,8 @@ static void esp32s3_simulide_bridge_init(Object *obj)
 
 static void esp32c3_simulide_bridge_init(Object *obj)
 {
+    QEMU_BUILD_BUG_ON(ARRAY_SIZE(esp32c3_simulide_bridge_maps) >
+                      ESP32_SIMULIDE_BRIDGE_MAX_RANGES);
     esp32_simulide_bridge_init_common(
         obj, TYPE_ESP32C3_SIMULIDE_BRIDGE,
         esp32c3_simulide_bridge_maps, ARRAY_SIZE( esp32c3_simulide_bridge_maps ),
@@ -294,6 +320,8 @@ static void esp32c3_simulide_bridge_init(Object *obj)
 
 static void esp8266_simulide_bridge_init(Object *obj)
 {
+    QEMU_BUILD_BUG_ON(ARRAY_SIZE(esp8266_simulide_bridge_maps) >
+                      ESP32_SIMULIDE_BRIDGE_MAX_RANGES);
     esp32_simulide_bridge_init_common(
         obj, TYPE_ESP8266_SIMULIDE_BRIDGE,
         esp8266_simulide_bridge_maps, ARRAY_SIZE( esp8266_simulide_bridge_maps ),

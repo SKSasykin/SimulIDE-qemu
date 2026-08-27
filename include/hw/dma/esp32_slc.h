@@ -4,6 +4,8 @@
 #include "hw/hw.h"
 #include "hw/sysbus.h"
 #include "hw/ssi/ssi.h"
+#include "qemu/timer.h"
+#include "net/net.h"
 
 #define TYPE_ESP32_SLC "esp32.slc"
 #define ESP32_SLC(obj) OBJECT_CHECK(Esp32SlcState, (obj), TYPE_ESP32_SLC)
@@ -44,4 +46,14 @@ typedef struct Esp32SlcState {
     uint32_t regs[ESP32_SLC_REG_COUNT];
 
     SSIBus *spi;
+
+    /* WiFi (SLC0) DMA glue: moves 802.11 frames between guest RAM
+     * (ESP-IDF lldesc chains) and the shared SimulIDE arena rings. */
+    qemu_irq wifi_irq;     /* -> ETS_WIFI_MAC_INTR_SOURCE */
+    hwaddr   rx_dsc_cur;   /* current RX descriptor guest addr */
+    QEMUTimer *rx_timer;   /* periodic RX drain from wifi_rx ring */
+    GQueue rx_queue;       /* deferred packets from QEMU net backend */
+
+    NICConf conf;
+    NICState *nic;
 } Esp32SlcState;

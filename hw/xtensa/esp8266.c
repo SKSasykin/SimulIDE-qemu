@@ -26,6 +26,7 @@
 #include "hw/char/esp32_uart.h"
 #include "hw/gpio/esp8266_gpio.h"
 #include "hw/timer/esp8266_frc1.h"
+#include "hw/dma/esp32_slc.h"
 #include "hw/misc/esp32_simulide_bridge.h"
 #include "hw/misc/unimp.h"
 #include "core-lx106/core-isa.h"
@@ -72,6 +73,7 @@ struct Esp8266MachineState {
 #define ESP8266_FRC_BASE    0x60000600
 #define ESP8266_SPI0_BASE   0x60000200
 #define ESP8266_DPORT_BASE  0x3ff00000
+#define ESP8266_VIRTUAL_WIFI_BASE 0x60001000
 
 #define ESP8266_DPORT_SPI       0x03
 #define ESP8266_DPORT_MACADDR   0x14
@@ -588,6 +590,12 @@ static void esp8266_machine_init(MachineState *machine)
         ms->cpu->env.pc = entry;
     }
     qemu_log("esp8266: loaded firmware, entry point 0x%08" PRIx64 "\n", entry);
+
+    DeviceState *virtual_wifi = qdev_new(TYPE_ESP32_SLC);
+    qemu_configure_nic_device(virtual_wifi, true, NULL);
+    sysbus_realize_and_unref(SYS_BUS_DEVICE(virtual_wifi), &error_fatal);
+    memory_region_add_subregion(get_system_memory(), ESP8266_VIRTUAL_WIFI_BASE,
+                                sysbus_mmio_get_region(SYS_BUS_DEVICE(virtual_wifi), 0));
 
     /* SimulIDE bridge shadows UART0/GPIO/UART1 (must be last, overlaps) */
     esp8266_simulide_bridge_create(get_system_memory(),
