@@ -106,6 +106,7 @@ typedef struct Esp32SimulideBridgeMap {
 static const Esp32SimulideBridgeMap esp32_simulide_bridge_maps[] = {
     { ESP32_SIMULIDE_BRIDGE_BASE + 0x00040000, 0x00040000 }, /* UART1 (hw UART0) */
     { ESP32_SIMULIDE_BRIDGE_BASE + 0x00044000, 0x00044000 }, /* GPIO              */
+    { ESP32_SIMULIDE_BRIDGE_BASE + 0x00048400, 0x00048400, 0x400 }, /* RTC_IO */
     { ESP32_SIMULIDE_BRIDGE_BASE + 0x00049000, 0x00049000 }, /* IOMUX             */
     { ESP32_SIMULIDE_BRIDGE_BASE + 0x00050000, 0x00050000 }, /* UART2 (hw UART1)  */
     { ESP32_SIMULIDE_BRIDGE_BASE + 0x00053000, 0x00053000 }, /* I2C1              */
@@ -179,6 +180,8 @@ static const Esp32SimulideBridgeMap esp8266_simulide_bridge_maps[] = {
     { 0x60000000, 0x0000, 0x100 }, /* UART0   */
     { 0x60000100, 0x0100, 0x100 }, /* HSPI    */
     { 0x60000300, 0x0300, 0x100 }, /* GPIO    */
+    { 0x60000700, 0x0700, 0x100 }, /* RTC     */
+    { 0x60000800, 0x0800, 0x100 }, /* IO_MUX  */
     { 0x60000D00, 0x0D00, 0x100 }, /* SAR ADC */
     { 0x60000F00, 0x0F00, 0x100 }, /* UART1   */
 };
