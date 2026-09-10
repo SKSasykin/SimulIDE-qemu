@@ -25,6 +25,8 @@
 #include "simuliface.h"
 
 #include "qemu/osdep.h"
+#include "qemu/main-loop.h"
+#include "qemu/thread.h"
 #include "qemu-main.h"
 #include "qemu/timer.h"
 #include "sysemu/runstate.h"
@@ -78,10 +80,46 @@ static void start_parent_watchdog( void )
 static simulide_interrupt_handler s_interrupt_handler;
 static void *s_interrupt_opaque;
 
+static QEMUBH *s_interrupt_bh;
+static QemuThread s_interrupt_thread;
+
 void simulide_set_interrupt_handler(simulide_interrupt_handler handler, void *opaque)
 {
     s_interrupt_handler = handler;
     s_interrupt_opaque = opaque;
+}
+
+static void simulide_drain_interrupts(void)
+{
+    while (m_arena->irq.tail != m_arena->irq.head)
+    {
+        uint32_t tail = m_arena->irq.tail;
+        __sync_synchronize();
+        qemuIrqEvent_t event = m_arena->irq.events[tail];
+        m_arena->irq.tail = (tail + 1) % QEMU_IRQ_RING_EVENTS;
+        if (s_interrupt_handler) {
+            s_interrupt_handler(event.number, event.level, s_interrupt_opaque);
+        }
+    }
+}
+
+static void simulide_interrupt_bh(void *opaque)
+{
+    (void)opaque;
+    simulide_drain_interrupts();
+}
+
+static void *simulide_interrupt_watcher(void *opaque)
+{
+    (void)opaque;
+    while (m_arena->running)
+    {
+        if (m_arena->irq.tail != m_arena->irq.head) {
+            qemu_bh_schedule(s_interrupt_bh);
+        }
+        g_usleep(100);
+    }
+    return NULL;
 }
 
 uint64_t getQemu_ps(void)
@@ -114,13 +152,7 @@ void simulide_signal( uint64_t action, uint64_t time_ps )
     m_arena->simuTime   = time_ps;
     s_simuTime          = time_ps;
     simulide_wait();
-    if( m_arena->qemuAction == SIM_INTERRUPT && s_interrupt_handler )
-    {
-        uint64_t number = m_arena->irqNumber;
-        uint64_t level = m_arena->irqLevel;
-        m_arena->qemuAction = SIM_NONE;
-        s_interrupt_handler(number, level, s_interrupt_opaque);
-    }
+    simulide_drain_interrupts();
 }
 
 uint32_t simulide_bridge_read( uint32_t addr )
@@ -245,6 +277,10 @@ int simuMain( int argc, char** argv )
     s_simuTime     = 0;
     m_arena->running = true;
 
+    s_interrupt_bh = qemu_bh_new(simulide_interrupt_bh, NULL);
+    qemu_thread_create(&s_interrupt_thread, "simulide-irq",
+                       simulide_interrupt_watcher, NULL, QEMU_THREAD_JOINABLE);
+
     printf("Qemu: initialized\n" );fflush( stdout );
 
     scheduleNextEvent();
@@ -254,6 +290,9 @@ int simuMain( int argc, char** argv )
     start_parent_watchdog();
 #endif
     int status = qemu_main_loop();
+    m_arena->running = false;
+    qemu_thread_join(&s_interrupt_thread);
+    qemu_bh_delete(s_interrupt_bh);
     qemu_cleanup( status );
 
 #if defined( __linux__ ) || defined( __APPLE__ )

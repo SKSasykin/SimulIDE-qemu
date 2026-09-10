@@ -42,6 +42,19 @@ typedef struct qemuWifiRing {
     qemuWifiFrame_t       frames[QEMU_WIFI_RING_FRAMES];
 } qemuWifiRing_t;
 
+#define QEMU_IRQ_RING_EVENTS 256
+
+typedef struct qemuIrqEvent {
+    uint32_t number;
+    uint32_t level;
+} qemuIrqEvent_t;
+
+typedef struct qemuIrqRing {
+    volatile uint32_t head;
+    volatile uint32_t tail;
+    qemuIrqEvent_t events[QEMU_IRQ_RING_EVENTS];
+} qemuIrqRing_t;
+
 typedef struct qemuArena{
     uint64_t simuTime;       // in ps
     uint64_t qemuTime;       // in ps
@@ -54,6 +67,8 @@ typedef struct qemuArena{
     uint64_t running;
     int64_t  loop_timeout_ns;
     double   ps_per_inst;
+
+    qemuIrqRing_t irq;
 
     qemuWifiRing_t wifi_rx;
     qemuWifiRing_t wifi_tx;
