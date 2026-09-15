@@ -30,6 +30,7 @@
 #include "elf.h"
 #include "hw/misc/esp32c3_reg.h"
 #include "hw/misc/esp32_simulide_bridge.h"
+#include "hw/misc/esp32_ble_hci.h"
 #include "hw/misc/esp32c3_rtc_cntl.h"
 #include "hw/misc/esp32c3_cache.h"
 #include "hw/char/esp32c3_uart.h"
@@ -656,6 +657,10 @@ static void esp32c3_machine_init(MachineState *machine)
                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(virtual_wifi), 0));
 
     esp32c3_simulide_bridge_create(sys_mem, DEVICE(&ms->intmatrix));
+    esp32_ble_hci_create(sys_mem, 0x60012000,
+                         qdev_get_gpio_in(DEVICE(&ms->intmatrix),
+                                          ETS_RWBLE_INTR_SOURCE),
+                         0x00012000);
 }
 
 

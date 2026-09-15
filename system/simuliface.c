@@ -146,7 +146,7 @@ static void simulide_wait(void) // Wait for SimulIDE to consume the event (simuT
     m_timeout = 0;
 }
 
-void simulide_signal( uint64_t action, uint64_t time_ps )
+static void simulide_signal( uint64_t action, uint64_t time_ps )
 {
     m_arena->simuAction = action;
     m_arena->simuTime   = time_ps;
@@ -178,6 +178,12 @@ void simulide_bridge_write( uint32_t addr, uint32_t value )
     m_arena->regAddr = addr; // addr is already an IOMEM offset
     m_arena->regData = value;
     simulide_signal( SIM_WRITE, simulide_time() );
+}
+
+void simulide_bt_notify( uint32_t addr )
+{
+    m_arena->regAddr = addr;
+    simulide_signal( SIM_BT, simulide_time() );
 }
 
 void doAction(void) // Legacy entry point for dormant devices

@@ -26,6 +26,7 @@
 #include "hw/xtensa/esp32.h"
 #include "hw/misc/ssi_psram.h"
 #include "hw/misc/esp32_simulide_bridge.h"
+#include "hw/misc/esp32_ble_hci.h"
 #include "hw/sd/dwc_sdmmc.h"
 #include "core-esp32/core-isa.h"
 #include "qemu/datadir.h"
@@ -827,6 +828,10 @@ static void esp32_machine_init(MachineState *machine)
 
     /* SimulIDE owns the whole IOMEM range: shadow all peripherals */
     esp32_simulide_bridge_create( get_system_memory(), DEVICE(&ss->intmatrix) );
+    esp32_ble_hci_create( get_system_memory(), 0x3ff52000,
+                          qdev_get_gpio_in(DEVICE(&ss->intmatrix),
+                                           ETS_RWBLE_INTR_SOURCE),
+                          0x00052000 );
 
     /* Need MMU initialized prior to ELF loading,
      * so that ELF gets loaded into virtual addresses

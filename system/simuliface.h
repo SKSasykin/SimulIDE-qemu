@@ -25,7 +25,7 @@
 //      wifi_rx : host  -> guest  (frames received, delivered to the driver)
 //      bt_tx   : guest -> host   (HCI/ACL/iso out)
 //      bt_rx   : host  -> guest  (HCI/ACL/iso in)
-//    head is written by the producer, tail by the consumer.
+//    tail is written by the producer, head by the consumer.
 
 #define QEMU_WIFI_RING_FRAMES 64
 #define QEMU_WIFI_FRAME_MAX   1536
@@ -137,5 +137,6 @@ int simuMain( int argc, char** argv );
 
 uint32_t simulide_bridge_read( uint32_t addr );
 void     simulide_bridge_write( uint32_t addr, uint32_t value );
+void     simulide_bt_notify( uint32_t addr );
 
 #endif
