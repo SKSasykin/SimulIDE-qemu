@@ -10,10 +10,12 @@ ESP32-C3 HTTP examples use a custom ESP-NETIF transport over the emulated SLC
 DMA controller. This does not emulate an 802.11 radio or make arbitrary
 firmware using Espressif's closed WiFi hardware driver work automatically.
 
-Bluetooth Classic and BLE are not supported end-to-end. Shared-memory BT
-rings and ESP32/ESP32-S3 bridge ranges are scaffolding for a future HCI
-transport; this fork currently has no Bluetooth controller, virtual radio,
-GATT implementation, or host Bluetooth adapter passthrough.
+Bluetooth Classic and BLE are not supported end-to-end. ESP32, ESP32-S3 and
+ESP32-C3 machines expose an ``esp32-ble-hci`` DMA device that transfers complete
+H4 packets through the shared-memory BT rings. SimulIDE provides the current
+development controller and deterministic medium; this QEMU fork does not
+implement a Bluetooth controller, RF model, GATT stack or host Bluetooth
+adapter passthrough by itself.
 
 Build:
 ======
