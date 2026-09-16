@@ -82,6 +82,7 @@ static void *s_interrupt_opaque;
 
 static QEMUBH *s_interrupt_bh;
 static QemuThread s_interrupt_thread;
+static QemuMutex s_signal_mutex;
 
 void simulide_set_interrupt_handler(simulide_interrupt_handler handler, void *opaque)
 {
@@ -146,7 +147,7 @@ static void simulide_wait(void) // Wait for SimulIDE to consume the event (simuT
     m_timeout = 0;
 }
 
-static void simulide_signal( uint64_t action, uint64_t time_ps )
+static void simulide_signal_locked( uint64_t action, uint64_t time_ps )
 {
     m_arena->simuAction = action;
     m_arena->simuTime   = time_ps;
@@ -155,11 +156,19 @@ static void simulide_signal( uint64_t action, uint64_t time_ps )
     simulide_drain_interrupts();
 }
 
+static void simulide_signal( uint64_t action, uint64_t time_ps )
+{
+    qemu_mutex_lock( &s_signal_mutex );
+    simulide_signal_locked( action, time_ps );
+    qemu_mutex_unlock( &s_signal_mutex );
+}
+
 uint32_t simulide_bridge_read( uint32_t addr )
 {
+    qemu_mutex_lock( &s_signal_mutex );
     m_arena->regAddr = addr; // addr is already an IOMEM offset
     m_arena->regData = 0;
-    simulide_signal( SIM_READ, simulide_time() );
+    simulide_signal_locked( SIM_READ, simulide_time() );
 
     m_timeout = 0;
     while( m_arena->qemuAction != SIM_READ ) // Wait for SimulIDE answer
@@ -170,20 +179,25 @@ uint32_t simulide_bridge_read( uint32_t addr )
 
     uint32_t val = (uint32_t)m_arena->regData;
     m_arena->qemuAction = 0;
+    qemu_mutex_unlock( &s_signal_mutex );
     return val;
 }
 
 void simulide_bridge_write( uint32_t addr, uint32_t value )
 {
+    qemu_mutex_lock( &s_signal_mutex );
     m_arena->regAddr = addr; // addr is already an IOMEM offset
     m_arena->regData = value;
-    simulide_signal( SIM_WRITE, simulide_time() );
+    simulide_signal_locked( SIM_WRITE, simulide_time() );
+    qemu_mutex_unlock( &s_signal_mutex );
 }
 
 void simulide_bt_notify( uint32_t addr )
 {
+    qemu_mutex_lock( &s_signal_mutex );
     m_arena->regAddr = addr;
-    simulide_signal( SIM_BT, simulide_time() );
+    simulide_signal_locked( SIM_BT, simulide_time() );
+    qemu_mutex_unlock( &s_signal_mutex );
 }
 
 void doAction(void) // Legacy entry point for dormant devices
@@ -274,6 +288,7 @@ int simuMain( int argc, char** argv )
     printf("-----------------------------------\n");
     fflush( stdout );
 
+    qemu_mutex_init( &s_signal_mutex );
     qemu_init( argc, argv );
 
     qtimer = (QEMUTimer*)malloc( sizeof(QEMUTimer) );
@@ -300,6 +315,7 @@ int simuMain( int argc, char** argv )
     qemu_thread_join(&s_interrupt_thread);
     qemu_bh_delete(s_interrupt_bh);
     qemu_cleanup( status );
+    qemu_mutex_destroy( &s_signal_mutex );
 
 #if defined( __linux__ ) || defined( __APPLE__ )
     munmap( arena, shMemSize ); // Un-map shared memory
