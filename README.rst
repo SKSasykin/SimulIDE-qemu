@@ -18,6 +18,15 @@ controller, RF model, GATT stack or host Bluetooth adapter passthrough by
 itself. Shared-mailbox producers are serialized so timer, peripheral bridge and
 Bluetooth notifications cannot overwrite one another.
 
+SPI flash support
+=================
+
+The ESP32, ESP32-S3 and ESP32-C3 machines use the writable ``m25p80`` flash
+backend, so page-program and erase operations are written back to the image
+file. The SimulIDE ESP8266 machine provides the corresponding SPI controller
+commands and writes its emulated flash image back to the ``-bios`` file. This
+allows the SimulIDE host to inspect SPIFFS data after guest firmware updates.
+
 Build:
 ======
 

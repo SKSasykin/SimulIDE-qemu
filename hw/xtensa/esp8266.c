@@ -11,6 +11,8 @@
  */
 
 #include "qemu/osdep.h"
+#include <fcntl.h>
+#include <unistd.h>
 #include "qemu/log.h"
 #include "qemu/error-report.h"
 #include "qemu/datadir.h"
@@ -115,11 +117,17 @@ enum {
 
 enum {
     ESP8266_SPI_CMD_USR_SHIFT = 18,
+    ESP8266_SPI_CMD_CE_SHIFT = 22,
+    ESP8266_SPI_CMD_BE_SHIFT = 23,
+    ESP8266_SPI_CMD_SE_SHIFT = 24,
+    ESP8266_SPI_CMD_PP_SHIFT = 25,
     ESP8266_SPI_CMD_WRDI_SHIFT = 29,
     ESP8266_SPI_CMD_WREN_SHIFT = 30,
     ESP8266_SPI_CMD_READ_SHIFT = 31,
     ESP8266_SPI_STATUS_WRENABLE_SHIFT = 1,
 };
+
+#define ESP8266_SPI_CMD_MASK 0xffc00000
 
 #define ESP8266_SPI_FLASH_CTRL_ENABLE_AHB BIT(17)
 #define ESP8266_SPI_FLASH_USER_FLASH_MODE  BIT(2)
@@ -129,7 +137,27 @@ typedef struct Esp8266SpiState {
     MemoryRegion cache;
     uint8_t *flash_image;
     uint32_t reg[ESP8266_SPI_MAX];
+    int flash_fd;
 } Esp8266SpiState;
+
+static void esp8266_flash_writeback(Esp8266SpiState *s, uint32_t offset,
+                                    const void *data, size_t len)
+{
+    const uint8_t *p = data;
+
+    if (s->flash_fd < 0) {
+        return;
+    }
+    while (len) {
+        ssize_t written = pwrite(s->flash_fd, p, len, offset);
+        if (written <= 0) {
+            break;
+        }
+        p += written;
+        offset += written;
+        len -= written;
+    }
+}
 
 static uint64_t esp8266_spi_read(void *opaque, hwaddr addr, unsigned size)
 {
@@ -143,16 +171,113 @@ static uint64_t esp8266_spi_read(void *opaque, hwaddr addr, unsigned size)
 
 static void esp8266_spi_cmd(Esp8266SpiState *s, uint64_t val)
 {
-    if (val & BIT(ESP8266_SPI_CMD_READ_SHIFT)) {
+    uint64_t cmd = val & ESP8266_SPI_CMD_MASK;
+    uint32_t addr = s->reg[ESP8266_SPI_FLASH_ADDR] & 0x3fffff;
+    uint32_t length = (s->reg[ESP8266_SPI_FLASH_ADDR] >> 24) & 0xff;
+    uint32_t wren = s->reg[ESP8266_SPI_FLASH_STATUS]
+                    & BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+
+    if (cmd == BIT(ESP8266_SPI_CMD_READ_SHIFT)) {
         if (s->reg[ESP8266_SPI_FLASH_USER] & ESP8266_SPI_FLASH_USER_FLASH_MODE
             && s->flash_image) {
-            uint32_t offset = s->reg[ESP8266_SPI_FLASH_ADDR] & 0xffffff;
-            uint32_t length = (s->reg[ESP8266_SPI_FLASH_ADDR] >> 24) & 0xff;
-            memcpy(s->reg + ESP8266_SPI_FLASH_C0,
-                   s->flash_image + offset, (length + 3) & ~3u);
+            if (!length) {
+                length = 4;
+            }
+            length = MIN(length, 32u);
+            if (addr + length <= ESP8266_MAX_FLASH_SZ) {
+                memcpy(s->reg + ESP8266_SPI_FLASH_C0,
+                       s->flash_image + addr, length);
+            }
+        }
+    } else if (cmd == BIT(ESP8266_SPI_CMD_PP_SHIFT)) {
+        if (wren && s->flash_image) {
+            if (!length || length > 32) {
+                length = 32;
+            }
+            if (addr + length <= ESP8266_MAX_FLASH_SZ) {
+                memcpy(s->flash_image + addr,
+                       s->reg + ESP8266_SPI_FLASH_C0, length);
+                esp8266_flash_writeback(s, addr, s->flash_image + addr,
+                                        length);
+            }
+            s->reg[ESP8266_SPI_FLASH_ADDR] = (addr + length) & 0x3fffff;
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+        }
+    } else if (cmd == BIT(ESP8266_SPI_CMD_SE_SHIFT)) {
+        if (wren && s->flash_image) {
+            addr &= ~0xfffu;
+            if (addr + 0x1000 <= ESP8266_MAX_FLASH_SZ) {
+                memset(s->flash_image + addr, 0xff, 0x1000);
+                esp8266_flash_writeback(s, addr, s->flash_image + addr, 0x1000);
+            }
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+        }
+    } else if (cmd == BIT(ESP8266_SPI_CMD_BE_SHIFT)) {
+        if (wren && s->flash_image) {
+            addr &= ~0xffffu;
+            if (addr + 0x10000 <= ESP8266_MAX_FLASH_SZ) {
+                memset(s->flash_image + addr, 0xff, 0x10000);
+                esp8266_flash_writeback(s, addr, s->flash_image + addr, 0x10000);
+            }
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+        }
+    } else if (cmd == BIT(ESP8266_SPI_CMD_CE_SHIFT)) {
+        if (wren && s->flash_image) {
+            memset(s->flash_image, 0xff, ESP8266_MAX_FLASH_SZ);
+            esp8266_flash_writeback(s, 0, s->flash_image,
+                                    ESP8266_MAX_FLASH_SZ);
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+        }
+    } else if (cmd == BIT(ESP8266_SPI_CMD_USR_SHIFT)) {
+        uint32_t opcode = s->reg[ESP8266_SPI_FLASH_USER2] & 0xff;
+        length = ((s->reg[ESP8266_SPI_FLASH_USER1] >> 17) & 0x1ff) + 1;
+        length = MIN(length, 64u);
+        if (opcode == 0x06) {
+            wren = BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+            s->reg[ESP8266_SPI_FLASH_STATUS] |= wren;
+        } else if (opcode == 0x04) {
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+        } else if (opcode == 0x05) {
+            s->reg[ESP8266_SPI_FLASH_C0] = 0;
+        } else if (opcode == 0x02 && wren && s->flash_image) {
+            if (addr + length <= ESP8266_MAX_FLASH_SZ) {
+                memcpy(s->flash_image + addr,
+                       s->reg + ESP8266_SPI_FLASH_C0, length);
+                esp8266_flash_writeback(s, addr, s->flash_image + addr,
+                                        length);
+            }
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+        } else if (opcode == 0x20 && wren && s->flash_image) {
+            addr &= ~0xfffu;
+            if (addr + 0x1000 <= ESP8266_MAX_FLASH_SZ) {
+                memset(s->flash_image + addr, 0xff, 0x1000);
+                esp8266_flash_writeback(s, addr, s->flash_image + addr, 0x1000);
+            }
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+        } else if (opcode == 0xd8 && wren && s->flash_image) {
+            addr &= ~0xffffu;
+            if (addr + 0x10000 <= ESP8266_MAX_FLASH_SZ) {
+                memset(s->flash_image + addr, 0xff, 0x10000);
+                esp8266_flash_writeback(s, addr, s->flash_image + addr, 0x10000);
+            }
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
+        } else if (opcode == 0xc7 && wren && s->flash_image) {
+            memset(s->flash_image, 0xff, ESP8266_MAX_FLASH_SZ);
+            esp8266_flash_writeback(s, 0, s->flash_image,
+                                    ESP8266_MAX_FLASH_SZ);
+            s->reg[ESP8266_SPI_FLASH_STATUS] &=
+                ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
         }
     }
-    if (val & BIT(ESP8266_SPI_CMD_WRDI_SHIFT)) {
+    if (cmd == BIT(ESP8266_SPI_CMD_WRDI_SHIFT)) {
         s->reg[ESP8266_SPI_FLASH_STATUS] &= ~BIT(ESP8266_SPI_STATUS_WRENABLE_SHIFT);
     }
     if (val & BIT(ESP8266_SPI_CMD_WREN_SHIFT)) {
@@ -508,7 +633,12 @@ static void esp8266_machine_init(MachineState *machine)
      * QEMU build. */
     spi = g_malloc(sizeof(*spi));
     memset(spi, 0, sizeof(*spi));
-    spi->flash_image = g_malloc0(ESP8266_MAX_FLASH_SZ);
+    spi->flash_image = g_malloc(ESP8266_MAX_FLASH_SZ);
+    memset(spi->flash_image, 0xff, ESP8266_MAX_FLASH_SZ);
+    spi->flash_fd = -1;
+    if (fw_path) {
+        spi->flash_fd = open(fw_path, O_RDWR);
+    }
     memory_region_init_io(&spi->iomem, NULL, &esp8266_spi_ops, spi,
                           "esp8266.spi0", 0x100);
     memory_region_init_io(&spi->cache, NULL, &esp8266_spi_cache_ops, spi,
